@@ -7,7 +7,8 @@ export const config = $state<HomeboxConfig>({
   receivingLocationId: '',
   stagingLocationId: '',
   receivingLocationName: '_RECEIVING',
-  stagingLocationName: '_STAGING'
+  stagingLocationName: '_STAGING',
+  labelType: '62red'
 });
 
 export const connected = $state({ value: false });

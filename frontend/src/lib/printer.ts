@@ -11,7 +11,7 @@ export interface PrintOptions {
  */
 export async function printLabel(entityId: string, options: PrintOptions = {}): Promise<void> {
   const relayUrl = config.relayUrl || '/relay';
-  const labelType = options.labelType || '62red';
+  const labelType = options.labelType || config.labelType || '62red';
   const token = options.token || config.token;
 
   const res = await fetch(`${relayUrl}/print`, {

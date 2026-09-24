@@ -113,3 +113,43 @@ def test_print_label_lp_fails(mock_popen, mock_get):
         response = client.post("/print", json={"entityId": "12345"})
 
     assert response.status_code == 500
+
+@patch("relay.httpx.AsyncClient.get")
+@patch("relay.subprocess.Popen")
+def test_print_label_dk2205_62mm_black(mock_popen, mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = make_test_png_bytes()
+    mock_get.return_value = mock_resp
+
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.communicate.return_value = (b"", b"")
+    mock_popen.return_value = proc
+
+    with TestClient(app) as client:
+        response = client.post("/print", json={"entityId": "12345", "labelType": "62"})
+
+    assert response.status_code == 200
+    assert response.json()["labelType"] == "62"
+    assert mock_popen.call_args[0][0] == ["lp", "-d", "QL-800", "-o", "raw"]
+
+@patch("relay.httpx.AsyncClient.get")
+@patch("relay.subprocess.Popen")
+def test_print_label_dk1201_diecut_29x90(mock_popen, mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = make_test_png_bytes()
+    mock_get.return_value = mock_resp
+
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.communicate.return_value = (b"", b"")
+    mock_popen.return_value = proc
+
+    with TestClient(app) as client:
+        response = client.post("/print", json={"entityId": "12345", "labelType": "29x90"})
+
+    assert response.status_code == 200
+    assert response.json()["labelType"] == "29x90"
+    assert mock_popen.call_args[0][0] == ["lp", "-d", "QL-800", "-o", "raw"]

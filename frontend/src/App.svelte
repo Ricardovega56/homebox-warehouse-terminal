@@ -9,12 +9,24 @@
   import { loadConfig, config, getApi } from './lib/store.svelte';
   import { testConnection } from './lib/bootstrap';
   import { createScannerEngine } from './lib/scanner';
+  import { bleScanner } from './lib/ble';
 
   let activeTab = $state('setup');
   let putAwayRef = $state<any>();
   let ingestRef = $state<any>();
   let locationsRef = $state<any>();
   let scannerEngine: any;
+  let unsubscribeBle: (() => void) | null = null;
+
+  function dispatchScan(raw: string) {
+    if (activeTab === 'putaway' && putAwayRef) {
+      putAwayRef.handleScan(raw);
+    } else if (activeTab === 'ingest' && ingestRef) {
+      ingestRef.handleScan(raw);
+    } else if (activeTab === 'locations' && locationsRef) {
+      locationsRef.handleScan(raw);
+    }
+  }
 
   onMount(async () => {
     loadConfig();
@@ -26,20 +38,15 @@
       }
     }
 
-    scannerEngine = createScannerEngine((raw) => {
-      if (activeTab === 'putaway' && putAwayRef) {
-        putAwayRef.handleScan(raw);
-      } else if (activeTab === 'ingest' && ingestRef) {
-        ingestRef.handleScan(raw);
-      } else if (activeTab === 'locations' && locationsRef) {
-        locationsRef.handleScan(raw);
-      }
-    });
+    scannerEngine = createScannerEngine(dispatchScan);
     scannerEngine.enable();
+
+    unsubscribeBle = bleScanner.onScan(dispatchScan);
   });
 
   onDestroy(() => {
     if (scannerEngine) scannerEngine.destroy();
+    if (unsubscribeBle) unsubscribeBle();
   });
 </script>
 

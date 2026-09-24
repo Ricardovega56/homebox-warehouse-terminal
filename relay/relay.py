@@ -44,6 +44,29 @@ def quantize_two_color(im: Image.Image) -> Image.Image:
     out.putdata(cleaned)
     return out
 
+def prepare_image_for_label(im: Image.Image, label_type: str) -> Image.Image:
+    """Resize/pad label image to match brother_ql requirements for the given label type."""
+    if label_type == "29x90":
+        # Die-cut 29mm x 90mm label (991 x 306 dots in landscape)
+        target_w, target_h = 991, 306
+        scale = min(target_w / float(im.size[0]), target_h / float(im.size[1]))
+        new_w = max(1, int(im.size[0] * scale))
+        new_h = max(1, int(im.size[1] * scale))
+        resized = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", (target_w, target_h), (255, 255, 255))
+        offset_x = (target_w - new_w) // 2
+        offset_y = (target_h - new_h) // 2
+        canvas.paste(resized, (offset_x, offset_y))
+        return canvas
+    else:
+        # Endless rolls (62mm: 62red or 62)
+        target_w = 696
+        if im.size[0] != target_w:
+            scale = target_w / float(im.size[0])
+            new_h = max(int(im.size[1] * scale), 160)
+            im = im.resize((target_w, new_h), Image.Resampling.LANCZOS)
+        return im
+
 client: httpx.AsyncClient = None
 
 @asynccontextmanager
@@ -83,11 +106,7 @@ async def print_label(req: PrintRequest):
 
     try:
         im = Image.open(io.BytesIO(resp.content))
-        # Ensure image matches 62mm printable width (696px)
-        if im.size[0] != DEFAULT_WIDTH:
-            scale = DEFAULT_WIDTH / float(im.size[0])
-            new_h = max(int(im.size[1] * scale), 160)
-            im = im.resize((DEFAULT_WIDTH, new_h), Image.Resampling.LANCZOS)
+        im = prepare_image_for_label(im, label_type)
 
         clean_im = quantize_two_color(im) if is_red else im
         qlr = BrotherQLRaster(PRINTER_MODEL)
