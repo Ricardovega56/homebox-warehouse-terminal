@@ -67,7 +67,15 @@ export class HomeboxApi {
   }
 
   async lookupByAssetId(assetId: string): Promise<Entity> {
-    return this.fetchApi(`/api/v1/assets/${assetId}`);
+    try {
+      return await this.fetchApi(`/api/v1/assets/${encodeURIComponent(assetId)}`);
+    } catch {
+      // Fallback: search entities by assetId
+      const items = await this.searchEntities(assetId);
+      const match = items.find(e => e.assetId?.toLowerCase() === assetId.toLowerCase()) || items[0];
+      if (match) return match;
+      throw new Error(`Asset not found: ${assetId}`);
+    }
   }
 
   async patchEntity(id: string, patch: { parentId?: string; quantity?: number; entityTypeId?: string; tagIds?: string[] }): Promise<Entity> {

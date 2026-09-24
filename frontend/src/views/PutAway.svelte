@@ -36,14 +36,14 @@
         currentItem = result.entity;
         phase = 'scan-bin';
       } else {
-        handleError(result.type === 'location' ? 'Expected Item, scanned Location' : 'Unknown Item');
+        handleError(result.type === 'location' ? 'Expected Item, scanned Location' : `Unknown Item: "${raw.trim()}"`);
       }
     } else if (phase === 'scan-bin') {
       if (result.type === 'location' && result.entity) {
         currentBin = result.entity;
         commitPutAway();
       } else {
-        handleError(result.type === 'item' ? 'Expected Bin, scanned Item' : 'Unknown Location');
+        handleError(result.type === 'item' ? 'Expected Bin, scanned Item' : `Unknown Location: "${raw.trim()}"`);
       }
     }
   }
@@ -75,7 +75,7 @@
       if (phase === 'error') {
         phase = currentItem ? 'scan-bin' : 'scan-item';
       }
-    }, 1500);
+    }, 2500);
   }
 </script>
 
