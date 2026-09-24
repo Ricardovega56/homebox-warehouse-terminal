@@ -14,18 +14,24 @@ export const config = $state<HomeboxConfig>({
 export const connected = $state({ value: false });
 
 export function saveConfig() {
-  localStorage.setItem('hb_config', JSON.stringify(config));
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('hb_config', JSON.stringify(config));
+  }
 }
 
 export function loadConfig() {
-  const saved = localStorage.getItem('hb_config');
-  if (saved) {
-    Object.assign(config, JSON.parse(saved));
+  if (typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem('hb_config');
+    if (saved) {
+      Object.assign(config, JSON.parse(saved));
+    }
   }
 }
 
 export function clearConfig() {
-  localStorage.removeItem('hb_config');
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('hb_config');
+  }
   config.baseUrl = '';
   config.token = '';
   config.relayUrl = '';

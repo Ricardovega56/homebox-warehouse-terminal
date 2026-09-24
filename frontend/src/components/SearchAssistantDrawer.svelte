@@ -144,7 +144,6 @@
             oninput={onInputChanged}
             placeholder="Where is my flux, hex keys, filter, screws...?"
             class="terminal-input w-full rounded-xl pl-9 pr-8 py-3 text-xs sm:text-sm text-white placeholder-slate-500 font-sans"
-            autofocus
           />
           <Search class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
           {#if searchQuery}
