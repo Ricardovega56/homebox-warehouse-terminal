@@ -1,0 +1,43 @@
+@import 'tailwindcss';
+
+body {
+  background-color: #000;
+  color: #fff;
+  overflow: hidden;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  user-select: none;
+}
+
+@keyframes pulse-green {
+  0% { background-color: rgba(34, 197, 94, 0); }
+  20% { background-color: rgba(34, 197, 94, 0.8); }
+  100% { background-color: rgba(34, 197, 94, 0); }
+}
+
+@keyframes pulse-red {
+  0% { background-color: rgba(239, 68, 68, 0); }
+  20% { background-color: rgba(239, 68, 68, 0.8); }
+  100% { background-color: rgba(239, 68, 68, 0); }
+}
+
+.flash-green {
+  animation: pulse-green 1.5s ease-out forwards;
+}
+
+.flash-red {
+  animation: pulse-red 1.5s ease-out forwards;
+}
+
+.scan-prompt-text {
+  font-size: 48px;
+  line-height: 1.2;
+}
+
+#app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
