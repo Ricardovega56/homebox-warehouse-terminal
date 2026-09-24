@@ -45,7 +45,7 @@ export class HomeboxApi {
     this.token = config.token;
   }
 
-  private async fetchApi(path: string, options: RequestInit = {}) {
+  private async fetchApi<T = any>(path: string, options: RequestInit = {}): Promise<T> {
     const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
     const headers = new Headers(options.headers || {});
     if (this.token) {
@@ -85,7 +85,8 @@ export class HomeboxApi {
   }
 
   async listLocations(): Promise<Entity[]> {
-    return this.fetchApi(`/api/v1/entities?isLocation=true`);
+    const res = await this.fetchApi<{ items: Entity[] }>(`/api/v1/entities?isLocation=true`);
+    return res.items ?? [];
   }
 
   async getEntityTypes(): Promise<EntityType[]> {
@@ -93,7 +94,8 @@ export class HomeboxApi {
   }
 
   async searchEntities(query: string): Promise<Entity[]> {
-    return this.fetchApi(`/api/v1/entities?q=${encodeURIComponent(query)}`);
+    const res = await this.fetchApi<{ items: Entity[] }>(`/api/v1/entities?q=${encodeURIComponent(query)}`);
+    return res.items ?? [];
   }
 
   async getStatus(): Promise<any> {
