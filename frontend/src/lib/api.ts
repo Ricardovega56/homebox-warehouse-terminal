@@ -63,7 +63,15 @@ export class HomeboxApi {
   }
 
   async getEntity(id: string): Promise<Entity> {
-    return this.fetchApi(`/api/v1/entities/${id}`);
+    try {
+      return await this.fetchApi(`/api/v1/entities/${id}`);
+    } catch (e) {
+      try {
+        return await this.fetchApi(`/api/v1/items/${id}`);
+      } catch {
+        throw e;
+      }
+    }
   }
 
   async lookupByAssetId(assetId: string): Promise<Entity> {
