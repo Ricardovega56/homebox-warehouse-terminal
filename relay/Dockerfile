@@ -8,7 +8,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY relay.py .
+RUN mkdir -p /data
+
+COPY *.py ./
 
 EXPOSE 5000
 CMD ["uvicorn", "relay:app", "--host", "0.0.0.0", "--port", "5000"]

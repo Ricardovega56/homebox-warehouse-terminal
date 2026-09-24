@@ -1,10 +1,11 @@
 <script lang="ts">
   import { connected, config } from '../lib/store.svelte';
   import { bleScanner } from '../lib/ble.svelte';
-  import { Bluetooth, Camera, Printer, Wifi, WifiOff } from 'lucide-svelte';
+  import { Bluetooth, Camera, Printer, Wifi, WifiOff, Search } from 'lucide-svelte';
 
-  const { onTriggerCamera } = $props<{
+  const { onTriggerCamera, onTriggerSearch } = $props<{
     onTriggerCamera?: () => void;
+    onTriggerSearch?: () => void;
   }>();
 
   const labelNames: Record<string, string> = {
@@ -45,6 +46,18 @@
 
   <!-- Hardware Controls & Indicators -->
   <div class="flex items-center gap-1.5 sm:gap-2">
+    <!-- Household Finder / Assistant Trigger -->
+    {#if onTriggerSearch}
+      <button
+        type="button"
+        onclick={onTriggerSearch}
+        title="Find items or check maintenance"
+        class="btn-tactile p-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-slate-300 hover:text-amber-400 transition-colors cursor-pointer"
+      >
+        <Search class="w-4 h-4" />
+      </button>
+    {/if}
+
     <!-- Camera Scanner Quick Trigger (for phone camera scan fallback) -->
     {#if onTriggerCamera}
       <button

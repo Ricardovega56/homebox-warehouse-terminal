@@ -5,6 +5,8 @@
   import ToastTicker from './components/ToastTicker.svelte';
   import BezelPulse from './components/BezelPulse.svelte';
   import CameraScannerModal from './components/CameraScannerModal.svelte';
+  import SearchAssistantDrawer from './components/SearchAssistantDrawer.svelte';
+  import PrintPreviewModal from './components/PrintPreviewModal.svelte';
   import PutAway from './views/PutAway.svelte';
   import Ingest from './views/Ingest.svelte';
   import Locations from './views/Locations.svelte';
@@ -25,6 +27,8 @@
   let orderingRef = $state<any>();
 
   let showCameraScanner = $state(false);
+  let showSearchAssistant = $state(false);
+  let previewPrintEntity = $state<{ id: string; name: string } | null>(null);
   let scannerEngine: any;
   let unsubscribeBle: (() => void) | null = null;
 
@@ -76,7 +80,10 @@
   <BezelPulse />
 
   <!-- Top Terminal Header & Hardware Controls -->
-  <Header onTriggerCamera={() => (showCameraScanner = true)} />
+  <Header 
+    onTriggerCamera={() => (showCameraScanner = true)} 
+    onTriggerSearch={() => (showSearchAssistant = true)}
+  />
 
   <!-- Non-blocking Activity Ticker / Toast -->
   <ToastTicker />
@@ -121,6 +128,26 @@
     <CameraScannerModal 
       onScan={(code) => dispatchScan(code)}
       onClose={() => (showCameraScanner = false)}
+    />
+  {/if}
+
+  <!-- Search & Maintenance Assistant Drawer -->
+  {#if showSearchAssistant}
+    <SearchAssistantDrawer 
+      onClose={() => (showSearchAssistant = false)}
+      onTriggerPrint={(id, name) => {
+        showSearchAssistant = false;
+        previewPrintEntity = { id, name };
+      }}
+    />
+  {/if}
+
+  <!-- Modular Print & Fallback Preview Modal -->
+  {#if previewPrintEntity}
+    <PrintPreviewModal 
+      entityId={previewPrintEntity.id}
+      entityName={previewPrintEntity.name}
+      onClose={() => (previewPrintEntity = null)}
     />
   {/if}
 </main>
