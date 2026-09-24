@@ -1,6 +1,6 @@
 <script lang="ts">
   import { connected, config } from '../lib/store.svelte';
-  import { bleScanner } from '../lib/ble';
+  import { bleScanner } from '../lib/ble.svelte';
 
   const labelNames: Record<string, string> = {
     '62red': 'DK-2251',

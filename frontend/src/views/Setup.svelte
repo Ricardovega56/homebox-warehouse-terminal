@@ -3,7 +3,7 @@
   import { config, saveConfig, connected, getApi } from '../lib/store.svelte';
   import { testConnection, ensureSentinelLocations, auditSentinelLocations } from '../lib/bootstrap';
   import { getSentinelTelemetryLogs, clearSentinelTelemetryLogs, type SentinelTelemetryEntry } from '../lib/telemetry';
-  import { bleScanner } from '../lib/ble';
+  import { bleScanner } from '../lib/ble.svelte';
   import type { Entity } from '../lib/api';
 
   let isTesting = $state(false);
@@ -313,7 +313,7 @@
         </div>
         
         <div class="space-y-1.5">
-          {#each auditData.receiving as r (r.id)}
+          {#each auditData.receiving as r, i (r.id ? `${r.id}_${i}` : i)}
             <div class="bg-gray-950 border {config.receivingLocationId === r.id ? 'border-emerald-500 ring-1 ring-emerald-500/30' : 'border-gray-800'} rounded-lg p-2.5 flex items-center justify-between text-xs font-mono">
               <div>
                 <div class="flex items-center gap-2">
@@ -324,7 +324,7 @@
                     </span>
                   {/if}
                 </div>
-                {#if r.parent}
+                {#if r.parent?.name}
                   <div class="text-[10px] text-gray-500 font-sans mt-0.5">Parent: {r.parent.name}</div>
                 {/if}
               </div>
@@ -354,7 +354,7 @@
         </div>
         
         <div class="space-y-1.5">
-          {#each auditData.staging as s (s.id)}
+          {#each auditData.staging as s, i (s.id ? `${s.id}_${i}` : i)}
             <div class="bg-gray-950 border {config.stagingLocationId === s.id ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-gray-800'} rounded-lg p-2.5 flex items-center justify-between text-xs font-mono">
               <div>
                 <div class="flex items-center gap-2">
@@ -399,17 +399,17 @@
       </div>
 
       <div class="space-y-2 max-h-48 overflow-y-auto">
-        {#each telemetryLogs as log}
+        {#each telemetryLogs as log, i (log.timestamp ? `${log.timestamp}_${i}` : i)}
           <div class="bg-gray-950/80 border border-gray-800 rounded-lg p-2 text-xs font-mono space-y-0.5">
             <div class="flex items-center justify-between text-gray-400">
               <span class="font-bold {log.action === 'created' ? 'text-amber-400' : 'text-blue-400'}">
-                [{log.action.toUpperCase()}] {log.name}
+                [{log.action ? log.action.toUpperCase() : 'LOG'}] {log.name || ''}
               </span>
-              <span class="text-[10px] text-gray-500 font-sans">{new Date(log.timestamp).toLocaleTimeString()}</span>
+              <span class="text-[10px] text-gray-500 font-sans">{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ''}</span>
             </div>
-            <div class="text-gray-300 truncate">UUID: {log.uuid}</div>
+            <div class="text-gray-300 truncate">UUID: {log.uuid || ''}</div>
             <div class="text-[10px] text-gray-500 font-sans">
-              Found {log.existingCount} duplicates • Trigger: {log.trigger}
+              Found {log.existingCount ?? 0} duplicates • Trigger: {log.trigger || ''}
             </div>
           </div>
         {/each}

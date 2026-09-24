@@ -9,7 +9,7 @@
   import { loadConfig, config, getApi } from './lib/store.svelte';
   import { testConnection } from './lib/bootstrap';
   import { createScannerEngine } from './lib/scanner';
-  import { bleScanner } from './lib/ble';
+  import { bleScanner } from './lib/ble.svelte';
 
   let activeTab = $state('setup');
   let putAwayRef = $state<any>();

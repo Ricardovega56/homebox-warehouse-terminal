@@ -154,8 +154,8 @@ export class HomeboxApi {
   }
 
   async listLocations(): Promise<Entity[]> {
-    const res = await this.fetchApi<{ items: Entity[] }>(`/api/v1/entities?isLocation=true`);
-    return res.items ?? [];
+    const res = await this.fetchApi<any>(`/api/v1/entities?isLocation=true`);
+    return Array.isArray(res) ? res : (res?.items ?? []);
   }
 
   async createLocation(data: { name: string; parentId?: string; description?: string }): Promise<Entity> {
@@ -173,8 +173,8 @@ export class HomeboxApi {
   }
 
   async searchEntities(query: string): Promise<Entity[]> {
-    const res = await this.fetchApi<{ items: Entity[] }>(`/api/v1/entities?q=${encodeURIComponent(query)}`);
-    return res.items ?? [];
+    const res = await this.fetchApi<any>(`/api/v1/entities?q=${encodeURIComponent(query)}`);
+    return Array.isArray(res) ? res : (res?.items ?? []);
   }
 
   async getStatus(): Promise<any> {
