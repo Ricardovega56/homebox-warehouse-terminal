@@ -33,8 +33,9 @@ services:
       - HOMEBOX_BASE_URL=http://homebox:7745
       - HOMEBOX_API_TOKEN=${HOMEBOX_API_TOKEN}
       - PRINTER_NAME=${PRINTER_NAME:-QL-800}
+      - PRINTER_MODEL=${PRINTER_MODEL:-QL-800}
+      - LABEL_TYPE=${LABEL_TYPE:-62red}
       - CUPS_SERVER=${CUPS_SERVER:-}
-      - MEDIA_SIZE=${MEDIA_SIZE:-62X1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

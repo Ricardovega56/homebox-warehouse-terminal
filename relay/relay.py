@@ -1,27 +1,48 @@
 """
-Print Relay — Fetches label PNGs from Homebox and pipes them to CUPS.
-
-POST /print { "entityId": "<uuid>" }
-  1. GET /api/v1/labelmaker/entity/{id} from Homebox → PNG bytes
-  2. Write to temp file
-  3. lp -d <PRINTER_NAME> -o media=29x90mm /tmp/label.png
+Print Relay — Fetches label PNGs from Homebox, converts to native Brother QL
+raster commands, and pipes them directly to CUPS (-o raw).
 """
 
+import io
 import os
 import subprocess
-import tempfile
+import warnings
 from contextlib import asynccontextmanager
+
+warnings.filterwarnings("ignore")
 
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from PIL import Image
+from brother_ql.conversion import convert
+from brother_ql.raster import BrotherQLRaster
 
 HOMEBOX_URL = os.environ.get("HOMEBOX_BASE_URL", "http://homebox:7745")
 HOMEBOX_TOKEN = os.environ.get("HOMEBOX_API_TOKEN", "")
 PRINTER_NAME = os.environ.get("PRINTER_NAME", "QL-800")
+PRINTER_MODEL = os.environ.get("PRINTER_MODEL", "QL-800")
+LABEL_TYPE = os.environ.get("LABEL_TYPE", "62red")
 CUPS_SERVER = os.environ.get("CUPS_SERVER", "")
-MEDIA_SIZE = os.environ.get("MEDIA_SIZE", "62X1")
+
+DEFAULT_WIDTH = 696  # 62mm printable width at 300 DPI
+
+def quantize_two_color(im: Image.Image) -> Image.Image:
+    """Strict quantization for two-color thermal paper (DK-2251)."""
+    im_rgb = im.convert("RGB")
+    data = im_rgb.getdata()
+    cleaned = []
+    for r, g, b in data:
+        if r > 130 and g < 110 and b < 110:
+            cleaned.append((255, 0, 0))
+        elif r < 128 and g < 128 and b < 128:
+            cleaned.append((0, 0, 0))
+        else:
+            cleaned.append((255, 255, 255))
+    out = Image.new("RGB", im_rgb.size)
+    out.putdata(cleaned)
+    return out
 
 client: httpx.AsyncClient = None
 
@@ -46,42 +67,58 @@ app.add_middleware(
 class PrintRequest(BaseModel):
     entityId: str
     token: str | None = None
-    media: str | None = None
+    labelType: str | None = None
 
 @app.post("/print")
 async def print_label(req: PrintRequest):
-    # Fetch label PNG from Homebox
     auth_token = req.token or HOMEBOX_TOKEN
     headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+
     resp = await client.get(f"/api/v1/labelmaker/entity/{req.entityId}", headers=headers)
     if resp.status_code != 200:
-        raise HTTPException(502, f"Homebox returned {resp.status_code}: {resp.text}")
+        raise HTTPException(resp.status_code, f"Homebox returned {resp.status_code}: {resp.text}")
 
-    # Write to temp file and send to CUPS
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        f.write(resp.content)
-        tmp_path = f.name
+    label_type = req.labelType or LABEL_TYPE
+    is_red = (label_type == "62red")
 
     try:
-        media = req.media or MEDIA_SIZE
-        cmd = ["lp", "-d", PRINTER_NAME]
-        if media:
-            cmd.extend(["-o", f"media={media}"])
+        im = Image.open(io.BytesIO(resp.content))
+        # Ensure image matches 62mm printable width (696px)
+        if im.size[0] != DEFAULT_WIDTH:
+            scale = DEFAULT_WIDTH / float(im.size[0])
+            new_h = max(int(im.size[1] * scale), 160)
+            im = im.resize((DEFAULT_WIDTH, new_h), Image.Resampling.LANCZOS)
+
+        clean_im = quantize_two_color(im) if is_red else im
+        qlr = BrotherQLRaster(PRINTER_MODEL)
+        instructions = convert(qlr, [clean_im], label_type, cut=True, red=is_red, hq=True)
+
+        cmd = ["lp", "-d", PRINTER_NAME, "-o", "raw"]
         if CUPS_SERVER:
             cmd.extend(["-h", CUPS_SERVER])
-        cmd.append(tmp_path)
 
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True, text=True, timeout=10,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
         )
-        if result.returncode != 0:
-            raise HTTPException(500, f"lp failed: {result.stderr}")
-    finally:
-        os.unlink(tmp_path)
+        stdout, stderr = proc.communicate(input=instructions, timeout=10)
+        if proc.returncode != 0:
+            raise HTTPException(500, f"lp failed: {stderr.decode()}")
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(500, f"Raster conversion/print failed: {str(e)}")
 
-    return {"status": "printed", "entityId": req.entityId, "media": media}
+    return {"status": "printed", "entityId": req.entityId, "labelType": label_type}
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "printer": PRINTER_NAME, "cups_server": CUPS_SERVER or "local", "media": MEDIA_SIZE}
+    return {
+        "status": "ok",
+        "printer": PRINTER_NAME,
+        "model": PRINTER_MODEL,
+        "labelType": LABEL_TYPE,
+        "cups_server": CUPS_SERVER or "local"
+    }

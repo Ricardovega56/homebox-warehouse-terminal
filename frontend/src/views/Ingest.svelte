@@ -113,7 +113,7 @@
         body: JSON.stringify({
           entityId: newEntity.id,
           token: config.token,
-          media: '62X1',
+          labelType: '62red',
         }),
       });
 
@@ -178,7 +178,7 @@
         body: JSON.stringify({
           entityId: result.entity.id,
           token: config.token,
-          media: '62X1',
+          labelType: '62red',
         }),
       });
 
