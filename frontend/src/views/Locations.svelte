@@ -195,7 +195,7 @@
 
   let selectedParentId = $state<string | null>(null);
 
-  let availableParents = $derived(() => {
+  let availableParents = $derived.by(() => {
     const parentMap = new Map<string, { id: string; name: string; count: number }>();
     for (const loc of locations) {
       if (loc.parent && loc.parent.id && loc.parent.name) {
@@ -210,7 +210,7 @@
     return Array.from(parentMap.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   });
 
-  let topLevelCount = $derived(() => {
+  let topLevelCount = $derived.by(() => {
     return locations.filter(l => !l.parent || !l.parent.id).length;
   });
 
@@ -219,7 +219,7 @@
       const q = searchQuery.trim();
       if (!q) return;
 
-      const matches = filteredLocations();
+      const matches = filteredLocations;
       if (matches.length === 1) {
         const loc = matches[0];
         searchQuery = loc.name;
@@ -234,7 +234,7 @@
   }
 
   // Filtered locations (supports clicked parent filter and scan UUID/URL extraction)
-  let filteredLocations = $derived(() => {
+  let filteredLocations = $derived.by(() => {
     let list = locations;
 
     // Filter by clicked parent chip if selected
@@ -477,10 +477,10 @@
           onclick={() => (selectedParentId = '__top__')}
           class="shrink-0 px-2.5 py-1 rounded-lg font-medium transition-colors {selectedParentId === '__top__' ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-400 hover:text-white'}"
         >
-          🏢 Top Level ({topLevelCount()})
+          🏢 Top Level ({topLevelCount})
         </button>
 
-        {#each availableParents() as parent (parent.id)}
+        {#each availableParents as parent (parent.id)}
           <button
             type="button"
             onclick={() => (selectedParentId = parent.id)}
@@ -500,7 +500,7 @@
             <span class="inline-block animate-spin text-2xl mb-2">⏳</span>
             <p>Loading warehouse locations...</p>
           </div>
-        {:else if filteredLocations().length === 0}
+        {:else if filteredLocations.length === 0}
           <div class="text-center py-12 text-gray-500 text-sm">
             <span class="text-3xl mb-2 block">📍</span>
             <p>No locations found matching filter</p>
@@ -515,7 +515,7 @@
             {/if}
           </div>
         {:else}
-          {#each filteredLocations() as loc (loc.id)}
+          {#each filteredLocations as loc (loc.id)}
             <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-3.5 flex items-center justify-between gap-3 hover:border-gray-700 transition-colors">
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">

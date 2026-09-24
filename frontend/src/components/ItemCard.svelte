@@ -2,7 +2,7 @@
   import type { Entity } from '../lib/api';
   const { entity } = $props<{ entity: Entity }>();
 
-  let isLocation = $derived(() => {
+  let isLocation = $derived.by(() => {
     const et = entity.entityType as any;
     return Boolean(et?.isLocation || et?.is_location || (entity as any).isLocation || (entity as any).is_location);
   });
@@ -10,7 +10,7 @@
 
 <div class="bg-gray-800/90 rounded-2xl p-5 shadow-lg border border-gray-700 m-4">
   <div class="flex items-center gap-2 mb-2">
-    {#if isLocation()}
+    {#if isLocation}
       <span class="bg-blue-900/60 border border-blue-600/60 text-blue-300 text-xs px-2.5 py-0.5 rounded-full font-semibold inline-flex items-center gap-1">
         📍 Sub-Location / Bin
       </span>
@@ -31,7 +31,7 @@
       <span>Current:</span>
       <strong class="text-white">📍 {entity.location?.name || entity.parent?.name}</strong>
     </div>
-  {:else if isLocation()}
+  {:else if isLocation}
     <div class="bg-gray-900/80 text-gray-400 border border-gray-700/80 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs mt-1">
       <span>Current: Top Level (No Parent)</span>
     </div>

@@ -154,8 +154,9 @@ export class HomeboxApi {
   }
 
   async listLocations(): Promise<Entity[]> {
-    const res = await this.fetchApi<any>(`/api/v1/entities?isLocation=true`);
-    return Array.isArray(res) ? res : (res?.items ?? []);
+    const res = await this.fetchApi<any>(`/api/v1/entities?pageSize=1000`);
+    const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
+    return items.filter(e => (e.entityType ? e.entityType.isLocation : true));
   }
 
   async createLocation(data: { name: string; parentId?: string; description?: string }): Promise<Entity> {

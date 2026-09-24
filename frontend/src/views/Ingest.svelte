@@ -30,7 +30,7 @@
   let modalSelectedParentId = $state<string | null>(null);
   let isLoadingLocations = $state(false);
 
-  let modalAvailableParents = $derived(() => {
+  let modalAvailableParents = $derived.by(() => {
     const parentMap = new Map<string, { id: string; name: string; count: number }>();
     for (const loc of availableLocations) {
       if (loc.parent && loc.parent.id && loc.parent.name) {
@@ -45,11 +45,11 @@
     return Array.from(parentMap.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   });
 
-  let modalTopLevelCount = $derived(() => {
+  let modalTopLevelCount = $derived.by(() => {
     return availableLocations.filter((l) => !l.parent || !l.parent.id).length;
   });
 
-  let filteredModalLocations = $derived(() => {
+  let filteredModalLocations = $derived.by(() => {
     let list = availableLocations;
 
     if (modalSelectedParentId === '__top__') {
@@ -134,7 +134,7 @@
       const raw = modalSearchQuery.trim();
       if (!raw) return;
 
-      const matches = filteredModalLocations();
+      const matches = filteredModalLocations;
       if (matches.length === 1) {
         handleLocationSelected(matches[0]);
         return;
@@ -697,7 +697,7 @@
           </div>
 
           <!-- Parent Hierarchy Filter Chips -->
-          {#if modalAvailableParents().length > 0}
+          {#if modalAvailableParents.length > 0}
             <div class="flex gap-1.5 overflow-x-auto pt-2 pb-0.5 text-xs">
               <button
                 type="button"
@@ -706,16 +706,16 @@
               >
                 All ({availableLocations.length})
               </button>
-              {#if modalTopLevelCount() > 0}
+              {#if modalTopLevelCount > 0}
                 <button
                   type="button"
                   onclick={() => (modalSelectedParentId = '__top__')}
                   class="px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition-colors shrink-0 cursor-pointer {modalSelectedParentId === '__top__' ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-400 hover:text-white'}"
                 >
-                  Top Level ({modalTopLevelCount()})
+                  Top Level ({modalTopLevelCount})
                 </button>
               {/if}
-              {#each modalAvailableParents() as parent (parent.id)}
+              {#each modalAvailableParents as parent (parent.id)}
                 <button
                   type="button"
                   onclick={() => (modalSelectedParentId = parent.id)}
@@ -735,13 +735,13 @@
               <span class="inline-block animate-spin text-lg">⏳</span>
               <span>Loading locations...</span>
             </div>
-          {:else if filteredModalLocations().length === 0}
+          {:else if filteredModalLocations.length === 0}
             <div class="text-center py-8 text-gray-500 text-sm">
               <p>No locations found matching "{modalSearchQuery}"</p>
               <p class="text-xs text-gray-600 mt-1">Scan a bin barcode or check spelling</p>
             </div>
           {:else}
-            {#each filteredModalLocations() as loc (loc.id)}
+            {#each filteredModalLocations as loc (loc.id)}
               <button
                 type="button"
                 onclick={() => handleLocationSelected(loc)}
