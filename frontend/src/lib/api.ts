@@ -77,11 +77,46 @@ export class HomeboxApi {
     });
   }
 
-  async createEntity(data: { name: string; entityTypeId: string; parentId?: string; quantity?: number }): Promise<Entity> {
+  async createEntity(data: { name: string; entityTypeId: string; parentId?: string; quantity?: number; description?: string }): Promise<Entity> {
     return this.fetchApi(`/api/v1/entities`, {
       method: 'POST',
       body: JSON.stringify(data)
     });
+  }
+
+  async uploadAttachment(entityId: string, file: File | Blob, fileName: string = 'photo.jpg', isPrimary: boolean = true): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file, fileName);
+    formData.append('type', 'photo');
+    formData.append('name', fileName);
+    if (isPrimary) {
+      formData.append('primary', 'true');
+    }
+
+    const url = `${this.baseUrl}/api/v1/entities/${entityId}/attachments`;
+    const headers = new Headers();
+    if (this.token) {
+      headers.set('Authorization', `Bearer ${this.token}`);
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`Upload error (${res.status}): ${errText || res.statusText}`);
+    }
+    return res.status === 204 ? null : res.json();
+  }
+
+  async getDefaultItemTypeId(): Promise<string> {
+    const types = await this.getEntityTypes();
+    const itemType = types.find(t => !t.isLocation);
+    if (!itemType) throw new Error('No item entity type found');
+    return itemType.id;
   }
 
   async listLocations(): Promise<Entity[]> {

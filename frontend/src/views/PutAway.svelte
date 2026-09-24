@@ -10,16 +10,21 @@
   let phase = $state<'scan-item' | 'scan-bin' | 'committing' | 'success' | 'error'>('scan-item');
   let currentItem = $state<Entity | null>(null);
   let currentBin = $state<Entity | null>(null);
+  let lastBinName = $state('');
   let errorMessage = $state('');
+
+  function reset() {
+    phase = 'scan-item';
+    currentItem = null;
+    currentBin = null;
+  }
 
   export async function handleScan(raw: string) {
     if (phase === 'committing') return;
     
     // Auto reset if scanning during success/error display
     if (phase === 'success' || phase === 'error') {
-      phase = 'scan-item';
-      currentItem = null;
-      currentBin = null;
+      reset();
     }
 
     playBeep();
@@ -46,6 +51,7 @@
   async function commitPutAway() {
     if (!currentItem || !currentBin) return;
     phase = 'committing';
+    lastBinName = currentBin.name;
     try {
       const api = getApi();
       await api.patchEntity(currentItem.id, { parentId: currentBin.id });
@@ -53,9 +59,7 @@
       phase = 'success';
       setTimeout(() => {
         if (phase === 'success') {
-          phase = 'scan-item';
-          currentItem = null;
-          currentBin = null;
+          reset();
         }
       }, 1500);
     } catch (e: any) {
@@ -77,7 +81,7 @@
 
 <div class="flex-1 flex flex-col relative">
   {#if phase === 'success'}
-    <StatusFlash color="green" message="MOVED" />
+    <StatusFlash color="green" message={`MOVED TO\n${lastBinName}`} />
   {/if}
   {#if phase === 'error'}
     <StatusFlash color="red" message={errorMessage} />
@@ -87,7 +91,16 @@
     <ScanPrompt icon="📦" label="Scan Item" />
   {:else if currentItem}
     <div class="flex-1 flex flex-col">
-      <ItemCard entity={currentItem} />
+      <div class="relative">
+        <ItemCard entity={currentItem} />
+        <button
+          type="button"
+          onclick={reset}
+          class="absolute top-7 right-7 bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+        >
+          ✕ Cancel
+        </button>
+      </div>
       {#if phase === 'scan-bin' || (phase === 'error' && currentItem)}
         <ScanPrompt icon="🔀" label="Scan Destination Bin" />
       {:else if phase === 'committing'}

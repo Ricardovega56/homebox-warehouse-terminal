@@ -32,9 +32,12 @@ services:
     environment:
       - HOMEBOX_BASE_URL=http://homebox:7745
       - HOMEBOX_API_TOKEN=${HOMEBOX_API_TOKEN}
-      - PRINTER_NAME=${PRINTER_NAME:-Brother_QL_800}
+      - PRINTER_NAME=${PRINTER_NAME:-QL-800}
+      - CUPS_SERVER=${CUPS_SERVER:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/cups/cups.sock:/var/run/cups/cups.sock
     depends_on:
       - homebox
     restart: unless-stopped

@@ -19,7 +19,8 @@ from pydantic import BaseModel
 
 HOMEBOX_URL = os.environ.get("HOMEBOX_BASE_URL", "http://homebox:7745")
 HOMEBOX_TOKEN = os.environ.get("HOMEBOX_API_TOKEN", "")
-PRINTER_NAME = os.environ.get("PRINTER_NAME", "Brother_QL_800")
+PRINTER_NAME = os.environ.get("PRINTER_NAME", "QL-800")
+CUPS_SERVER = os.environ.get("CUPS_SERVER", "")
 
 client: httpx.AsyncClient = None
 
@@ -58,8 +59,13 @@ async def print_label(req: PrintRequest):
         tmp_path = f.name
 
     try:
+        cmd = ["lp", "-d", PRINTER_NAME, "-o", "media=29x90mm"]
+        if CUPS_SERVER:
+            cmd.extend(["-h", CUPS_SERVER])
+        cmd.append(tmp_path)
+
         result = subprocess.run(
-            ["lp", "-d", PRINTER_NAME, "-o", "media=29x90mm", tmp_path],
+            cmd,
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
@@ -71,4 +77,4 @@ async def print_label(req: PrintRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "printer": PRINTER_NAME}
+    return {"status": "ok", "printer": PRINTER_NAME, "cups_server": CUPS_SERVER or "local"}
