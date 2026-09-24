@@ -193,15 +193,79 @@
     }
   }
 
-  // Filtered locations
+  let selectedParentId = $state<string | null>(null);
+
+  let availableParents = $derived(() => {
+    const parentMap = new Map<string, { id: string; name: string; count: number }>();
+    for (const loc of locations) {
+      if (loc.parent && loc.parent.id && loc.parent.name) {
+        const existing = parentMap.get(loc.parent.id);
+        if (existing) {
+          existing.count++;
+        } else {
+          parentMap.set(loc.parent.id, { id: loc.parent.id, name: loc.parent.name, count: 1 });
+        }
+      }
+    }
+    return Array.from(parentMap.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  });
+
+  let topLevelCount = $derived(() => {
+    return locations.filter(l => !l.parent || !l.parent.id).length;
+  });
+
+  function handleSearchKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      const q = searchQuery.trim();
+      if (!q) return;
+
+      const matches = filteredLocations();
+      if (matches.length === 1) {
+        const loc = matches[0];
+        searchQuery = loc.name;
+        playSuccess();
+        triggerFlash('green', `FOUND: ${loc.name}`, 1500);
+        (e.target as HTMLElement)?.blur();
+      } else if (matches.length === 0) {
+        playError();
+        triggerFlash('red', `No matching location found`, 2000);
+      }
+    }
+  }
+
+  // Filtered locations (supports clicked parent filter and scan UUID/URL extraction)
   let filteredLocations = $derived(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return locations;
-    return locations.filter(l => 
-      l.name.toLowerCase().includes(q) ||
-      (l.assetId && l.assetId.toLowerCase().includes(q)) ||
-      (l.parent?.name && l.parent.name.toLowerCase().includes(q))
-    );
+    let list = locations;
+
+    // Filter by clicked parent chip if selected
+    if (selectedParentId === '__top__') {
+      list = list.filter(l => !l.parent || !l.parent.id);
+    } else if (selectedParentId) {
+      list = list.filter(l => l.parent?.id === selectedParentId);
+    }
+
+    const rawQ = searchQuery.trim();
+    if (!rawQ) return list;
+
+    // Extract UUID from scan barcode (e.g. /item/<uuid> or /entities/<uuid> or raw UUID)
+    const uuidMatch = rawQ.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    const searchUuid = uuidMatch ? uuidMatch[1].toLowerCase() : null;
+
+    // Extract Asset ID from /a/<assetId> pattern
+    const assetMatch = rawQ.match(/\/a\/([^\s\/?#]+)/i);
+    const searchAsset = assetMatch ? assetMatch[1].toLowerCase() : null;
+
+    const q = rawQ.toLowerCase();
+
+    return list.filter(l => {
+      if (searchUuid && l.id.toLowerCase() === searchUuid) return true;
+      if (searchAsset && l.assetId && l.assetId.toLowerCase() === searchAsset) return true;
+      if (l.name.toLowerCase().includes(q)) return true;
+      if (l.assetId && l.assetId.toLowerCase().includes(q)) return true;
+      if (l.parent?.name && l.parent.name.toLowerCase().includes(q)) return true;
+      if (l.id.toLowerCase().includes(q)) return true;
+      return false;
+    });
   });
 </script>
 
@@ -380,7 +444,8 @@
           <input
             type="text"
             bind:value={searchQuery}
-            placeholder="🔍 Search locations..."
+            onkeydown={handleSearchKeyDown}
+            placeholder="🔍 Search name, ID, or scan barcode..."
             class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
           />
           {#if searchQuery}
@@ -395,6 +460,39 @@
         </div>
       </div>
 
+      <!-- Parent Hierarchy Filter Chips -->
+      <div class="px-3 py-2 bg-gray-950 border-b border-gray-800 flex items-center gap-1.5 overflow-x-auto text-xs">
+        <span class="text-gray-500 font-semibold shrink-0 text-[11px] uppercase tracking-wider pr-1">Parent:</span>
+        
+        <button
+          type="button"
+          onclick={() => (selectedParentId = null)}
+          class="shrink-0 px-2.5 py-1 rounded-lg font-medium transition-colors {selectedParentId === null ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-400 hover:text-white'}"
+        >
+          All ({locations.length})
+        </button>
+
+        <button
+          type="button"
+          onclick={() => (selectedParentId = '__top__')}
+          class="shrink-0 px-2.5 py-1 rounded-lg font-medium transition-colors {selectedParentId === '__top__' ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-400 hover:text-white'}"
+        >
+          🏢 Top Level ({topLevelCount()})
+        </button>
+
+        {#each availableParents() as parent (parent.id)}
+          <button
+            type="button"
+            onclick={() => (selectedParentId = parent.id)}
+            class="shrink-0 px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1 {selectedParentId === parent.id ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-300 hover:text-white'}"
+          >
+            <span>📍</span>
+            <span>{parent.name}</span>
+            <span class="opacity-60 text-[10px]">({parent.count})</span>
+          </button>
+        {/each}
+      </div>
+
       <!-- Locations List -->
       <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
         {#if isLoadingLocations && locations.length === 0}
@@ -405,7 +503,16 @@
         {:else if filteredLocations().length === 0}
           <div class="text-center py-12 text-gray-500 text-sm">
             <span class="text-3xl mb-2 block">📍</span>
-            <p>No locations found matching "{searchQuery}"</p>
+            <p>No locations found matching filter</p>
+            {#if selectedParentId || searchQuery}
+              <button
+                type="button"
+                onclick={() => { selectedParentId = null; searchQuery = ''; }}
+                class="mt-2 text-blue-400 hover:text-blue-300 text-xs font-semibold underline cursor-pointer"
+              >
+                Clear all filters
+              </button>
+            {/if}
           </div>
         {:else}
           {#each filteredLocations() as loc (loc.id)}
@@ -417,9 +524,14 @@
                 </div>
                 <div class="flex items-center gap-2 mt-1 text-xs text-gray-400">
                   {#if loc.parent}
-                    <span class="bg-gray-800 px-2 py-0.5 rounded text-gray-300">
+                    <button
+                      type="button"
+                      onclick={() => (selectedParentId = loc.parent?.id || null)}
+                      class="bg-blue-950/60 hover:bg-blue-900 border border-blue-800/60 text-blue-300 hover:text-white px-2 py-0.5 rounded text-xs transition-colors flex items-center gap-1 active:scale-95 cursor-pointer"
+                      title={`Filter locations inside ${loc.parent.name}`}
+                    >
                       ↳ {loc.parent.name}
-                    </span>
+                    </button>
                   {/if}
                   {#if loc.assetId}
                     <span class="font-mono text-gray-500">[{loc.assetId}]</span>
