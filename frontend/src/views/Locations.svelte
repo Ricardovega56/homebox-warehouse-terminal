@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import StatusFlash from '../components/StatusFlash.svelte';
-  import { resolveScan } from '../lib/resolver';
+  import { resolveScan, formatScanError } from '../lib/resolver';
   import { getApi, config } from '../lib/store.svelte';
   import { playSuccess, playError, playBeep } from '../lib/audio';
   import { printLabel } from '../lib/printer';
@@ -10,6 +10,7 @@
   type Mode = 'create' | 'list';
   let mode = $state<Mode>('create');
   let viewState = $state<'ready' | 'processing' | 'success' | 'error'>('ready');
+  let isPrinting = $state(false);
   let flashMessage = $state('');
   let flashColor = $state<'green' | 'red'>('green');
 
@@ -69,12 +70,13 @@
     }, durationMs);
   }
 
-  async function handleCreateAndPrint() {
+  async function handleCreateLocation(shouldPrint: boolean) {
     const trimmed = locationName.trim();
     if (!trimmed || viewState === 'processing') return;
 
     playBeep();
     viewState = 'processing';
+    isPrinting = shouldPrint;
     const api = getApi();
 
     try {
@@ -84,11 +86,14 @@
         description: description.trim() || undefined,
       });
 
-      // Send print job to Brother QL-800
-      await printLabel(newLoc.id);
-
-      playSuccess();
-      triggerFlash('green', `CREATED & PRINTED\n${newLoc.name}`, 2200);
+      if (shouldPrint) {
+        await printLabel(newLoc.id);
+        playSuccess();
+        triggerFlash('green', `CREATED & PRINTED\n${newLoc.name}`, 2200);
+      } else {
+        playSuccess();
+        triggerFlash('green', `LOCATION CREATED\n${newLoc.name}`, 2000);
+      }
 
       // Auto-increment name if enabled, otherwise clear
       if (autoIncrement) {
@@ -103,6 +108,8 @@
     } catch (e: any) {
       playError();
       triggerFlash('red', e.message || 'Failed to create location', 3500);
+    } finally {
+      isPrinting = false;
     }
   }
 
@@ -167,8 +174,10 @@
     try {
       const result = await resolveScan(raw, api);
       if (result.type !== 'location' || !result.entity) {
-        const itemHint = result.type === 'item' ? ` (Scanned item "${result.entity?.name}")` : '';
-        throw new Error(`Expected Location QR to reprint${itemHint}`);
+        if (!result.entity) {
+          throw new Error(formatScanError(raw, 'location'));
+        }
+        throw new Error(`Expected Location QR, scanned item "${result.entity.name}"`);
       }
 
       const loc = result.entity;
@@ -241,7 +250,7 @@
             id="loc-name"
             type="text"
             bind:value={locationName}
-            onkeydown={(e) => { if (e.key === 'Enter') handleCreateAndPrint(); }}
+            onkeydown={(e) => { if (e.key === 'Enter') handleCreateLocation(true); }}
             placeholder="e.g. BIN-A1-01 or SHELF-2B"
             disabled={viewState === 'processing'}
             class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-base text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
@@ -311,20 +320,36 @@
         />
       </div>
 
-      <!-- Submit & Print Button -->
-      <div class="pt-2">
+      <!-- Submit Actions: Primary (Print) + Compact Side (Save Only) -->
+      <div class="pt-2 flex items-stretch gap-2.5">
         <button
           type="button"
-          onclick={handleCreateAndPrint}
+          onclick={() => handleCreateLocation(true)}
           disabled={!locationName.trim() || viewState === 'processing'}
-          class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold py-4 px-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer disabled:cursor-not-allowed"
+          class="flex-1 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold py-4 px-4 rounded-xl text-base sm:text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer disabled:cursor-not-allowed"
         >
-          {#if viewState === 'processing'}
+          {#if viewState === 'processing' && isPrinting}
             <span class="inline-block animate-spin text-xl">⏳</span>
             <span>Creating & Printing...</span>
           {:else}
             <span class="text-xl">🖨️</span>
-            <span>Create & Print Location Label</span>
+            <span>Create & Print Label</span>
+          {/if}
+        </button>
+
+        <button
+          type="button"
+          onclick={() => handleCreateLocation(false)}
+          disabled={!locationName.trim() || viewState === 'processing'}
+          title="Create location without printing label"
+          class="shrink-0 bg-gray-800/90 hover:bg-gray-700 active:bg-gray-600 disabled:bg-gray-900 disabled:text-gray-600 text-gray-300 hover:text-white border border-gray-700 font-semibold py-3 px-3.5 rounded-xl text-xs flex flex-col items-center justify-center gap-0.5 shadow transition-all cursor-pointer disabled:cursor-not-allowed"
+        >
+          {#if viewState === 'processing' && !isPrinting}
+            <span class="inline-block animate-spin text-base">⏳</span>
+            <span class="text-[10px]">Saving</span>
+          {:else}
+            <span class="text-base">💾</span>
+            <span class="text-[10px] tracking-tight text-gray-400">Save Only</span>
           {/if}
         </button>
       </div>

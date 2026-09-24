@@ -116,11 +116,15 @@
     });
   }
 
-  async function handleCreateAndPrint() {
+  let successMessage = $state('');
+  let isPrinting = $state(false);
+
+  async function handleCreate(shouldPrint: boolean) {
     if (!itemName.trim() || viewState === 'processing') return;
 
     playBeep();
     viewState = 'processing';
+    isPrinting = shouldPrint;
     const api = getApi();
 
     try {
@@ -145,8 +149,12 @@
         await api.uploadAttachment(newEntity.id, blob, p.file.name || `photo_${i + 1}.jpg`, i === 0);
       }
 
-      // Fire print request via printLabel helper
-      await printLabel(newEntity.id);
+      if (shouldPrint) {
+        await printLabel(newEntity.id);
+        successMessage = `RECEIVED & PRINTED\n${newEntity.name}`;
+      } else {
+        successMessage = `ITEM CREATED\n${newEntity.name}`;
+      }
 
       lastItemName = newEntity.name;
       playSuccess();
@@ -168,6 +176,8 @@
       setTimeout(() => {
         if (viewState === 'error') viewState = 'ready';
       }, 3500);
+    } finally {
+      isPrinting = false;
     }
   }
 
@@ -198,6 +208,7 @@
 
       await printLabel(result.entity.id);
 
+      successMessage = `RECEIVED & PRINTED\n${result.entity.name}`;
       playSuccess();
       viewState = 'success';
       setTimeout(() => {
@@ -216,7 +227,7 @@
 
 <div class="flex-1 flex flex-col relative overflow-hidden bg-gray-950">
   {#if viewState === 'success'}
-    <StatusFlash color="green" message={`RECEIVED & PRINTED\n${lastItemName}`} />
+    <StatusFlash color="green" message={successMessage || `RECEIVED & PRINTED\n${lastItemName}`} />
   {/if}
   {#if viewState === 'error'}
     <StatusFlash color="red" message={errorMessage} />
@@ -390,20 +401,36 @@
         {/if}
       </div>
 
-      <!-- Submit & Print Button -->
-      <div class="pt-2">
+      <!-- Submit Actions: Primary (Print) + Compact Side (Save Only) -->
+      <div class="pt-2 flex items-stretch gap-2.5">
         <button
           type="button"
-          onclick={handleCreateAndPrint}
+          onclick={() => handleCreate(true)}
           disabled={!itemName.trim() || viewState === 'processing'}
-          class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold py-4 px-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer disabled:cursor-not-allowed"
+          class="flex-1 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold py-4 px-4 rounded-xl text-base sm:text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer disabled:cursor-not-allowed"
         >
-          {#if viewState === 'processing'}
+          {#if viewState === 'processing' && isPrinting}
             <span class="inline-block animate-spin text-xl">⏳</span>
             <span>Creating & Printing...</span>
           {:else}
             <span class="text-xl">🖨️</span>
-            <span>Create & Print Label</span>
+            <span>Create & Print</span>
+          {/if}
+        </button>
+
+        <button
+          type="button"
+          onclick={() => handleCreate(false)}
+          disabled={!itemName.trim() || viewState === 'processing'}
+          title="Create item without printing label"
+          class="shrink-0 bg-gray-800/90 hover:bg-gray-700 active:bg-gray-600 disabled:bg-gray-900 disabled:text-gray-600 text-gray-300 hover:text-white border border-gray-700 font-semibold py-3 px-3.5 rounded-xl text-xs flex flex-col items-center justify-center gap-0.5 shadow transition-all cursor-pointer disabled:cursor-not-allowed"
+        >
+          {#if viewState === 'processing' && !isPrinting}
+            <span class="inline-block animate-spin text-base">⏳</span>
+            <span class="text-[10px]">Saving</span>
+          {:else}
+            <span class="text-base">💾</span>
+            <span class="text-[10px] tracking-tight text-gray-400">Save Only</span>
           {/if}
         </button>
       </div>

@@ -2,8 +2,48 @@ import { HomeboxApi, type Entity } from './api';
 
 export function classify(entity: Entity): 'item' | 'location' | 'unknown' {
   if (!entity) return 'unknown';
-  if (entity.entityType?.isLocation || (entity as any).isLocation) return 'location';
+  const et = entity.entityType as any;
+  if (
+    et?.isLocation === true ||
+    et?.is_location === true ||
+    (entity as any).isLocation === true ||
+    (entity as any).is_location === true
+  ) {
+    return 'location';
+  }
   return 'item';
+}
+
+export function formatScanError(raw: string, expected?: 'item' | 'location'): string {
+  const clean = (raw || '').trim();
+  if (!clean) return 'Empty barcode scanned';
+
+  const uuidMatch = clean.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  if (uuidMatch) {
+    const shortId = uuidMatch[1].slice(-6);
+    return expected
+      ? `Unknown ${expected} (...${shortId})`
+      : `Unrecognized barcode (...${shortId})`;
+  }
+
+  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+    try {
+      const u = new URL(clean);
+      const shortPath = u.pathname.length > 18 ? u.pathname.slice(-12) : u.pathname;
+      return `Unrecognized URL (...${shortPath})`;
+    } catch {}
+  }
+
+  if (clean.startsWith('/')) {
+    const short = clean.length > 20 ? clean.slice(-15) : clean;
+    return `Unrecognized path (...${short})`;
+  }
+
+  if (clean.length > 20) {
+    return `Unrecognized: "${clean.slice(0, 16)}..."`;
+  }
+
+  return `Unrecognized: "${clean}"`;
 }
 
 export async function resolveScan(raw: string, api: HomeboxApi): Promise<{ type: 'item' | 'location' | 'unknown'; entity?: Entity }> {
