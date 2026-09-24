@@ -4,6 +4,7 @@
   import TabBar from './components/TabBar.svelte';
   import PutAway from './views/PutAway.svelte';
   import Ingest from './views/Ingest.svelte';
+  import Locations from './views/Locations.svelte';
   import Setup from './views/Setup.svelte';
   import { loadConfig, config, getApi } from './lib/store.svelte';
   import { testConnection } from './lib/bootstrap';
@@ -12,6 +13,7 @@
   let activeTab = $state('setup');
   let putAwayRef = $state<any>();
   let ingestRef = $state<any>();
+  let locationsRef = $state<any>();
   let scannerEngine: any;
 
   onMount(async () => {
@@ -29,6 +31,8 @@
         putAwayRef.handleScan(raw);
       } else if (activeTab === 'ingest' && ingestRef) {
         ingestRef.handleScan(raw);
+      } else if (activeTab === 'locations' && locationsRef) {
+        locationsRef.handleScan(raw);
       }
     });
     scannerEngine.enable();
@@ -49,6 +53,8 @@
       <PutAway bind:this={putAwayRef} />
     {:else if activeTab === 'ingest'}
       <Ingest bind:this={ingestRef} />
+    {:else if activeTab === 'locations'}
+      <Locations bind:this={locationsRef} />
     {/if}
   </div>
 

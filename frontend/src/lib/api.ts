@@ -59,7 +59,7 @@ export class HomeboxApi {
     if (!res.ok) {
       throw new Error(`API Error: ${res.status} ${res.statusText}`);
     }
-    return res.status === 204 ? null : res.json();
+    return (res.status === 204 ? (null as unknown as T) : res.json());
   }
 
   async getEntity(id: string): Promise<Entity> {
@@ -86,7 +86,17 @@ export class HomeboxApi {
     }
   }
 
-  async patchEntity(id: string, patch: { parentId?: string; quantity?: number; entityTypeId?: string; tagIds?: string[] }): Promise<Entity> {
+  async patchEntity(
+    id: string,
+    patch: {
+      parentId?: string;
+      quantity?: number;
+      entityTypeId?: string;
+      tagIds?: string[];
+      name?: string;
+      description?: string;
+    }
+  ): Promise<Entity> {
     return this.fetchApi(`/api/v1/entities/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch)
@@ -135,9 +145,26 @@ export class HomeboxApi {
     return itemType.id;
   }
 
+  async getLocationEntityTypeId(): Promise<string> {
+    const types = await this.getEntityTypes();
+    const locType = types.find(t => t.isLocation);
+    if (!locType) throw new Error('No location entity type found');
+    return locType.id;
+  }
+
   async listLocations(): Promise<Entity[]> {
     const res = await this.fetchApi<{ items: Entity[] }>(`/api/v1/entities?isLocation=true`);
     return res.items ?? [];
+  }
+
+  async createLocation(data: { name: string; parentId?: string; description?: string }): Promise<Entity> {
+    const entityTypeId = await this.getLocationEntityTypeId();
+    return this.createEntity({
+      name: data.name,
+      entityTypeId,
+      parentId: data.parentId || undefined,
+      description: data.description || undefined
+    });
   }
 
   async getEntityTypes(): Promise<EntityType[]> {

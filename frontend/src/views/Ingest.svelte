@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import ScanPrompt from '../components/ScanPrompt.svelte';
   import StatusFlash from '../components/StatusFlash.svelte';
   import { resolveScan } from '../lib/resolver';
   import { getApi, config } from '../lib/store.svelte';
   import { ensureSentinelLocations } from '../lib/bootstrap';
   import { playSuccess, playError, playBeep } from '../lib/audio';
+  import { printLabel } from '../lib/printer';
 
   type Mode = 'create' | 'scan';
   let mode = $state<Mode>('create');
@@ -16,29 +18,65 @@
   let itemName = $state('');
   let itemQty = $state(1);
   let itemDescription = $state('');
-  let selectedFile = $state<File | null>(null);
-  let previewUrl = $state<string | null>(null);
+
+  interface AttachedPhoto {
+    id: string;
+    file: File;
+    previewUrl: string;
+  }
+  const MAX_PHOTOS = 5;
+  let photos = $state<AttachedPhoto[]>([]);
   let fileInputRef = $state<HTMLInputElement | null>(null);
 
   function handleFileChange(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      selectedFile = input.files[0];
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      previewUrl = URL.createObjectURL(selectedFile);
+    if (!input.files || input.files.length === 0) return;
+
+    const availableSlots = MAX_PHOTOS - photos.length;
+    if (availableSlots <= 0) return;
+
+    const filesToAdd = Array.from(input.files).slice(0, availableSlots);
+    const newPhotos: AttachedPhoto[] = filesToAdd.map((file) => ({
+      id: Math.random().toString(36).substring(2, 9),
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+
+    photos = [...photos, ...newPhotos];
+    input.value = '';
+  }
+
+  function removePhoto(id: string) {
+    const photo = photos.find((p) => p.id === id);
+    if (photo) {
+      URL.revokeObjectURL(photo.previewUrl);
+    }
+    photos = photos.filter((p) => p.id !== id);
+  }
+
+  function setPrimaryPhoto(id: string) {
+    const index = photos.findIndex((p) => p.id === id);
+    if (index > 0) {
+      const selected = photos[index];
+      photos = [selected, ...photos.filter((p) => p.id !== id)];
     }
   }
 
-  function removePhoto() {
-    selectedFile = null;
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      previewUrl = null;
+  function clearPhotos() {
+    for (const p of photos) {
+      URL.revokeObjectURL(p.previewUrl);
     }
+    photos = [];
     if (fileInputRef) {
       fileInputRef.value = '';
     }
   }
+
+  onDestroy(() => {
+    for (const p of photos) {
+      URL.revokeObjectURL(p.previewUrl);
+    }
+  });
 
   async function compressImage(file: File): Promise<Blob> {
     if (!file.type.startsWith('image/')) return file;
@@ -100,28 +138,15 @@
         entityTypeId,
       });
 
-      if (selectedFile) {
-        const blob = await compressImage(selectedFile);
-        await api.uploadAttachment(newEntity.id, blob, selectedFile.name || 'photo.jpg', true);
+      // Upload photos sequentially (first photo marked as primary)
+      for (let i = 0; i < photos.length; i++) {
+        const p = photos[i];
+        const blob = await compressImage(p.file);
+        await api.uploadAttachment(newEntity.id, blob, p.file.name || `photo_${i + 1}.jpg`, i === 0);
       }
 
-      // Fire print request via relay and verify response
-      const relayUrl = config.relayUrl || '/relay';
-      const printRes = await fetch(`${relayUrl}/print`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entityId: newEntity.id,
-          token: config.token,
-          labelType: '62red',
-        }),
-      });
-
-      if (!printRes.ok) {
-        const errJson = await printRes.json().catch(() => null);
-        const detail = errJson?.detail || `HTTP ${printRes.status}`;
-        throw new Error(`Item saved, but printing failed:\n${detail}`);
-      }
+      // Fire print request via printLabel helper
+      await printLabel(newEntity.id);
 
       lastItemName = newEntity.name;
       playSuccess();
@@ -131,7 +156,7 @@
       itemName = '';
       itemQty = 1;
       itemDescription = '';
-      removePhoto();
+      clearPhotos();
 
       setTimeout(() => {
         if (viewState === 'success') viewState = 'ready';
@@ -171,22 +196,7 @@
 
       lastItemName = result.entity.name;
 
-      const relayUrl = config.relayUrl || '/relay';
-      const printRes = await fetch(`${relayUrl}/print`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entityId: result.entity.id,
-          token: config.token,
-          labelType: '62red',
-        }),
-      });
-
-      if (!printRes.ok) {
-        const errJson = await printRes.json().catch(() => null);
-        const detail = errJson?.detail || `HTTP ${printRes.status}`;
-        throw new Error(`Item moved, but printing failed:\n${detail}`);
-      }
+      await printLabel(result.entity.id);
 
       playSuccess();
       viewState = 'success';
@@ -298,32 +308,73 @@
         </div>
       </div>
 
-      <!-- Camera / Photo Attachment -->
+      <!-- Camera / Multi-Photo Attachment (Up to 5) -->
       <div>
-        <span class="block text-sm font-semibold text-gray-300 mb-1.5">Photo (optional)</span>
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-sm font-semibold text-gray-300">Photos (optional)</span>
+          <span class="text-xs font-mono text-gray-400 bg-gray-800/80 px-2 py-0.5 rounded-full border border-gray-700">
+            {photos.length} / {MAX_PHOTOS}
+          </span>
+        </div>
         
         <input
           type="file"
           accept="image/*"
           capture="environment"
+          multiple
           class="hidden"
           bind:this={fileInputRef}
           onchange={handleFileChange}
         />
 
-        {#if previewUrl}
-          <div class="relative inline-block border-2 border-emerald-500/80 rounded-xl overflow-hidden bg-gray-900">
-            <img src={previewUrl} alt="Item Preview" class="w-36 h-36 object-cover" />
-            <button
-              type="button"
-              onclick={removePhoto}
-              class="absolute top-1.5 right-1.5 bg-black/80 hover:bg-red-600 text-white rounded-full w-7 h-7 flex items-center justify-center font-bold text-sm shadow transition-colors"
-            >
-              ✕
-            </button>
-            <div class="absolute bottom-0 inset-x-0 bg-black/70 text-[10px] text-emerald-300 text-center py-0.5">
-              Photo Attached
-            </div>
+        {#if photos.length > 0}
+          <div class="flex gap-2.5 overflow-x-auto pb-2 pt-1">
+            {#each photos as photo, i (photo.id)}
+              <div class="relative shrink-0 w-24 h-24 rounded-xl overflow-hidden border-2 {i === 0 ? 'border-amber-400 ring-2 ring-amber-400/30' : 'border-gray-700'} bg-gray-900 group">
+                <img src={photo.previewUrl} alt={`Photo ${i + 1}`} class="w-full h-full object-cover" />
+                
+                <!-- Remove button -->
+                <button
+                  type="button"
+                  onclick={() => removePhoto(photo.id)}
+                  disabled={viewState === 'processing'}
+                  class="absolute top-1 right-1 bg-black/80 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center font-bold text-xs shadow transition-colors"
+                  title="Remove photo"
+                >
+                  ✕
+                </button>
+
+                <!-- Primary badge or tap to make primary -->
+                {#if i === 0}
+                  <div class="absolute bottom-0 inset-x-0 bg-amber-500/90 text-black text-[10px] font-bold text-center py-0.5 leading-none shadow">
+                    ⭐ Primary
+                  </div>
+                {:else}
+                  <button
+                    type="button"
+                    onclick={() => setPrimaryPhoto(photo.id)}
+                    disabled={viewState === 'processing'}
+                    class="absolute bottom-0 inset-x-0 bg-black/80 hover:bg-amber-600 text-[10px] text-gray-300 hover:text-white text-center py-0.5 leading-none transition-colors"
+                    title="Set as main thumbnail"
+                  >
+                    Set Primary
+                  </button>
+                {/if}
+              </div>
+            {/each}
+
+            {#if photos.length < MAX_PHOTOS}
+              <button
+                type="button"
+                onclick={() => fileInputRef?.click()}
+                disabled={viewState === 'processing'}
+                class="shrink-0 w-24 h-24 border-2 border-dashed border-gray-700 hover:border-gray-500 active:bg-gray-800 rounded-xl flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <span class="text-xl">➕</span>
+                <span class="text-[11px] font-medium">Add Photo</span>
+                <span class="text-[10px] text-gray-500">{MAX_PHOTOS - photos.length} left</span>
+              </button>
+            {/if}
           </div>
         {:else}
           <button
@@ -333,8 +384,8 @@
             class="w-full border-2 border-dashed border-gray-700 hover:border-gray-500 active:bg-gray-800/50 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:text-white transition-colors cursor-pointer"
           >
             <span class="text-3xl">📷</span>
-            <span class="text-sm font-medium">Take Photo / Choose Image</span>
-            <span class="text-xs text-gray-500">Auto-saved as item thumbnail</span>
+            <span class="text-sm font-medium">Take Photo / Choose Images</span>
+            <span class="text-xs text-gray-500">Up to 5 pictures (first is main thumbnail)</span>
           </button>
         {/if}
       </div>

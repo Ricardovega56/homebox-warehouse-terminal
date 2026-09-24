@@ -1,0 +1,489 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import StatusFlash from '../components/StatusFlash.svelte';
+  import { resolveScan } from '../lib/resolver';
+  import { getApi, config } from '../lib/store.svelte';
+  import { playSuccess, playError, playBeep } from '../lib/audio';
+  import { printLabel } from '../lib/printer';
+  import type { Entity } from '../lib/api';
+
+  type Mode = 'create' | 'list';
+  let mode = $state<Mode>('create');
+  let viewState = $state<'ready' | 'processing' | 'success' | 'error'>('ready');
+  let flashMessage = $state('');
+  let flashColor = $state<'green' | 'red'>('green');
+
+  // Locations state
+  let locations = $state<Entity[]>([]);
+  let isLoadingLocations = $state(false);
+  let searchQuery = $state('');
+
+  // Form fields for Create
+  let locationName = $state('');
+  let parentId = $state('');
+  let description = $state('');
+  let autoIncrement = $state(true);
+
+  // Rename modal / inline state
+  let editingLocation = $state<Entity | null>(null);
+  let editName = $state('');
+  let printingLocationId = $state<string | null>(null);
+
+  onMount(async () => {
+    await fetchLocations();
+  });
+
+  async function fetchLocations() {
+    isLoadingLocations = true;
+    try {
+      const api = getApi();
+      const items = await api.listLocations();
+      // Sort alphabetically by name
+      locations = items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    } catch (e: any) {
+      console.error('Failed to load locations', e);
+    } finally {
+      isLoadingLocations = false;
+    }
+  }
+
+  function incrementName(name: string): string {
+    const match = name.match(/^(.*?)(\d+)(\D*)$/);
+    if (!match) {
+      return `${name}-2`;
+    }
+    const [, prefix, numStr, suffix] = match;
+    const nextNum = parseInt(numStr, 10) + 1;
+    const padded = String(nextNum).padStart(numStr.length, '0');
+    return `${prefix}${padded}${suffix}`;
+  }
+
+  function triggerFlash(color: 'green' | 'red', message: string, durationMs = 2000) {
+    flashColor = color;
+    flashMessage = message;
+    viewState = color === 'green' ? 'success' : 'error';
+    setTimeout(() => {
+      if (viewState === 'success' || viewState === 'error') {
+        viewState = 'ready';
+      }
+    }, durationMs);
+  }
+
+  async function handleCreateAndPrint() {
+    const trimmed = locationName.trim();
+    if (!trimmed || viewState === 'processing') return;
+
+    playBeep();
+    viewState = 'processing';
+    const api = getApi();
+
+    try {
+      const newLoc = await api.createLocation({
+        name: trimmed,
+        parentId: parentId || undefined,
+        description: description.trim() || undefined,
+      });
+
+      // Send print job to Brother QL-800
+      await printLabel(newLoc.id);
+
+      playSuccess();
+      triggerFlash('green', `CREATED & PRINTED\n${newLoc.name}`, 2200);
+
+      // Auto-increment name if enabled, otherwise clear
+      if (autoIncrement) {
+        locationName = incrementName(trimmed);
+      } else {
+        locationName = '';
+      }
+      description = '';
+
+      // Refresh locations list in background
+      fetchLocations();
+    } catch (e: any) {
+      playError();
+      triggerFlash('red', e.message || 'Failed to create location', 3500);
+    }
+  }
+
+  async function handleReprint(loc: Entity) {
+    if (printingLocationId) return;
+    playBeep();
+    printingLocationId = loc.id;
+
+    try {
+      await printLabel(loc.id);
+      playSuccess();
+      triggerFlash('green', `REPRINTED\n${loc.name}`, 1800);
+    } catch (e: any) {
+      playError();
+      triggerFlash('red', e.message || `Failed to print ${loc.name}`, 3500);
+    } finally {
+      printingLocationId = null;
+    }
+  }
+
+  function openEdit(loc: Entity) {
+    editingLocation = loc;
+    editName = loc.name;
+  }
+
+  function closeEdit() {
+    editingLocation = null;
+    editName = '';
+  }
+
+  async function handleSaveEdit(printAfter: boolean = false) {
+    if (!editingLocation || !editName.trim()) return;
+    const locId = editingLocation.id;
+    const newName = editName.trim();
+
+    try {
+      const api = getApi();
+      await api.patchEntity(locId, { name: newName });
+
+      if (printAfter) {
+        await printLabel(locId);
+      }
+
+      playSuccess();
+      triggerFlash('green', printAfter ? `RENAMED & PRINTED\n${newName}` : `RENAMED: ${newName}`, 2000);
+      closeEdit();
+      await fetchLocations();
+    } catch (e: any) {
+      playError();
+      triggerFlash('red', e.message || 'Failed to update location', 3500);
+    }
+  }
+
+  // Barcode / QR scan handler for instant reprint when on Locations tab
+  export async function handleScan(raw: string) {
+    if (viewState === 'processing' || printingLocationId) return;
+
+    playBeep();
+    viewState = 'processing';
+    const api = getApi();
+
+    try {
+      const result = await resolveScan(raw, api);
+      if (result.type !== 'location' || !result.entity) {
+        const itemHint = result.type === 'item' ? ` (Scanned item "${result.entity?.name}")` : '';
+        throw new Error(`Expected Location QR to reprint${itemHint}`);
+      }
+
+      const loc = result.entity;
+      await printLabel(loc.id);
+
+      playSuccess();
+      triggerFlash('green', `SCANNED & REPRINTED\n${loc.name}`, 2000);
+    } catch (e: any) {
+      playError();
+      triggerFlash('red', e.message || 'Failed to resolve location', 3500);
+    } finally {
+      if (viewState === 'processing') viewState = 'ready';
+    }
+  }
+
+  // Filtered locations
+  let filteredLocations = $derived(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return locations;
+    return locations.filter(l => 
+      l.name.toLowerCase().includes(q) ||
+      (l.assetId && l.assetId.toLowerCase().includes(q)) ||
+      (l.parent?.name && l.parent.name.toLowerCase().includes(q))
+    );
+  });
+</script>
+
+<div class="flex-1 flex flex-col relative overflow-hidden bg-gray-950">
+  {#if viewState === 'success' || viewState === 'error'}
+    <StatusFlash color={flashColor} message={flashMessage} />
+  {/if}
+
+  <!-- Header mode switcher -->
+  <div class="flex border-b border-gray-800 bg-gray-900/60 p-2 gap-2 shrink-0">
+    <button
+      type="button"
+      onclick={() => (mode = 'create')}
+      class="flex-1 py-2 px-3 text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 {mode === 'create' ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-400 hover:text-white'}"
+    >
+      <span>✨ New Location</span>
+    </button>
+    <button
+      type="button"
+      onclick={() => { mode = 'list'; fetchLocations(); }}
+      class="flex-1 py-2 px-3 text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 {mode === 'list' ? 'bg-blue-600 text-white shadow' : 'bg-gray-800 text-gray-400 hover:text-white'}"
+    >
+      <span>📋 Relabel & Search ({locations.length})</span>
+    </button>
+  </div>
+
+  {#if mode === 'create'}
+    <!-- Create Location View -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <!-- Fast labeling banner -->
+      <div class="flex items-center justify-between bg-blue-950/40 border border-blue-900/60 rounded-xl px-3.5 py-2.5 text-xs text-blue-300">
+        <span class="flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Target: <strong class="text-white">Warehouse Location</strong></span>
+        </span>
+        <span class="text-blue-400 font-mono">Prints: QL-800</span>
+      </div>
+
+      <!-- Location Name Input -->
+      <div>
+        <label for="loc-name" class="block text-sm font-semibold text-gray-300 mb-1.5">
+          Location Name <span class="text-red-400">*</span>
+        </label>
+        <div class="relative">
+          <input
+            id="loc-name"
+            type="text"
+            bind:value={locationName}
+            onkeydown={(e) => { if (e.key === 'Enter') handleCreateAndPrint(); }}
+            placeholder="e.g. BIN-A1-01 or SHELF-2B"
+            disabled={viewState === 'processing'}
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-base text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+          />
+          {#if locationName}
+            <button
+              type="button"
+              onclick={() => (locationName = '')}
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
+            >
+              ✕
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Speed Feature: Auto-increment Toggle -->
+      <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <input
+            id="auto-inc"
+            type="checkbox"
+            bind:checked={autoIncrement}
+            class="w-5 h-5 rounded border-gray-700 text-blue-600 focus:ring-blue-500 bg-gray-800 cursor-pointer"
+          />
+          <label for="auto-inc" class="text-sm font-medium text-gray-200 cursor-pointer select-none">
+            Auto-increment after print
+          </label>
+        </div>
+        <span class="text-[11px] text-gray-400 font-mono bg-gray-800 px-2 py-0.5 rounded">
+          {locationName ? `${locationName} → ${incrementName(locationName)}` : 'e.g. 01 → 02'}
+        </span>
+      </div>
+
+      <!-- Parent Location Selector -->
+      <div>
+        <label for="loc-parent" class="block text-sm font-semibold text-gray-300 mb-1.5">
+          Parent Location <span class="text-gray-500 text-xs font-normal">(Optional hierarchy)</span>
+        </label>
+        <select
+          id="loc-parent"
+          bind:value={parentId}
+          disabled={viewState === 'processing'}
+          class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3.5 py-3 text-sm text-white focus:outline-none focus:border-blue-500"
+        >
+          <option value="">-- None (Top Level) --</option>
+          {#each locations as loc (loc.id)}
+            <option value={loc.id}>
+              {loc.name} {loc.parent ? `(${loc.parent.name})` : ''}
+            </option>
+          {/each}
+        </select>
+      </div>
+
+      <!-- Description Input -->
+      <div>
+        <label for="loc-desc" class="block text-sm font-semibold text-gray-300 mb-1.5">
+          Description <span class="text-gray-500 text-xs font-normal">(Optional)</span>
+        </label>
+        <input
+          id="loc-desc"
+          type="text"
+          bind:value={description}
+          placeholder="e.g. Top shelf, right-side hardware bin"
+          disabled={viewState === 'processing'}
+          class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+        />
+      </div>
+
+      <!-- Submit & Print Button -->
+      <div class="pt-2">
+        <button
+          type="button"
+          onclick={handleCreateAndPrint}
+          disabled={!locationName.trim() || viewState === 'processing'}
+          class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold py-4 px-4 rounded-xl text-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer disabled:cursor-not-allowed"
+        >
+          {#if viewState === 'processing'}
+            <span class="inline-block animate-spin text-xl">⏳</span>
+            <span>Creating & Printing...</span>
+          {:else}
+            <span class="text-xl">🖨️</span>
+            <span>Create & Print Location Label</span>
+          {/if}
+        </button>
+      </div>
+    </div>
+  {:else}
+    <!-- Relabel & Search View -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+      <!-- Instant Scan Reminder Banner -->
+      <div class="bg-gray-900 border-b border-gray-800 px-4 py-2.5 flex items-center justify-between text-xs text-gray-300">
+        <div class="flex items-center gap-2">
+          <span class="text-base">⚡</span>
+          <span><strong>Fast Relabel:</strong> Scan existing barcode to instantly reprint!</span>
+        </div>
+        <button
+          type="button"
+          onclick={fetchLocations}
+          disabled={isLoadingLocations}
+          class="text-blue-400 hover:text-blue-300 font-medium flex items-center gap-1 active:scale-95 transition-transform"
+        >
+          <span>{isLoadingLocations ? '⏳' : '🔄'}</span>
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      <!-- Search Input -->
+      <div class="p-3 border-b border-gray-800 bg-gray-950">
+        <div class="relative">
+          <input
+            type="text"
+            bind:value={searchQuery}
+            placeholder="🔍 Search locations..."
+            class="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
+          {#if searchQuery}
+            <button
+              type="button"
+              onclick={() => (searchQuery = '')}
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
+            >
+              ✕
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Locations List -->
+      <div class="flex-1 overflow-y-auto p-3 space-y-2.5">
+        {#if isLoadingLocations && locations.length === 0}
+          <div class="text-center py-12 text-gray-500 text-sm">
+            <span class="inline-block animate-spin text-2xl mb-2">⏳</span>
+            <p>Loading warehouse locations...</p>
+          </div>
+        {:else if filteredLocations().length === 0}
+          <div class="text-center py-12 text-gray-500 text-sm">
+            <span class="text-3xl mb-2 block">📍</span>
+            <p>No locations found matching "{searchQuery}"</p>
+          </div>
+        {:else}
+          {#each filteredLocations() as loc (loc.id)}
+            <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-3.5 flex items-center justify-between gap-3 hover:border-gray-700 transition-colors">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">📍</span>
+                  <span class="font-bold text-white text-base truncate font-mono">{loc.name}</span>
+                </div>
+                <div class="flex items-center gap-2 mt-1 text-xs text-gray-400">
+                  {#if loc.parent}
+                    <span class="bg-gray-800 px-2 py-0.5 rounded text-gray-300">
+                      ↳ {loc.parent.name}
+                    </span>
+                  {/if}
+                  {#if loc.assetId}
+                    <span class="font-mono text-gray-500">[{loc.assetId}]</span>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Action buttons -->
+              <div class="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onclick={() => openEdit(loc)}
+                  class="bg-gray-800 hover:bg-gray-700 active:scale-95 text-gray-300 hover:text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+                  title="Rename location"
+                >
+                  <span>✏️</span>
+                  <span>Rename</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => handleReprint(loc)}
+                  disabled={printingLocationId === loc.id}
+                  class="bg-blue-600 hover:bg-blue-500 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 text-white font-bold px-3.5 py-2 rounded-lg text-xs flex items-center gap-1.5 shadow transition-all cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {#if printingLocationId === loc.id}
+                    <span class="inline-block animate-spin">⏳</span>
+                    <span>Printing...</span>
+                  {:else}
+                    <span>🖨️</span>
+                    <span>Print Label</span>
+                  {/if}
+                </button>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Rename / Relabel Modal -->
+  {#if editingLocation}
+    <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-bold text-white flex items-center gap-1.5">
+            <span>✏️</span> Relabel / Rename Location
+          </h3>
+          <button
+            type="button"
+            onclick={closeEdit}
+            class="text-gray-400 hover:text-white text-lg p-1"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div>
+          <label for="edit-name" class="block text-xs font-semibold text-gray-400 mb-1">
+            New Location Name
+          </label>
+          <input
+            id="edit-name"
+            type="text"
+            bind:value={editName}
+            class="w-full bg-gray-950 border border-gray-700 rounded-xl px-3.5 py-2.5 text-base text-white font-mono focus:outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div class="space-y-2 pt-1">
+          <button
+            type="button"
+            onclick={() => handleSaveEdit(true)}
+            disabled={!editName.trim() || editName.trim() === editingLocation.name}
+            class="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold py-2.5 px-3 rounded-xl text-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed"
+          >
+            <span>🖨️</span>
+            <span>Save & Print New Label</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => handleSaveEdit(false)}
+            disabled={!editName.trim() || editName.trim() === editingLocation.name}
+            class="w-full bg-gray-800 hover:bg-gray-700 active:scale-95 text-gray-200 font-semibold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>Save Only (Don't Print)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+</div>

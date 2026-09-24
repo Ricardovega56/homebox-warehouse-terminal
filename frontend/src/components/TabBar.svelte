@@ -4,6 +4,7 @@
   const tabs = [
     { id: 'ingest', label: '📦 Ingest' },
     { id: 'putaway', label: '🔀 Put-Away' },
+    { id: 'locations', label: '📍 Locations' },
     { id: 'setup', label: '⚙️ Setup' }
   ];
 </script>

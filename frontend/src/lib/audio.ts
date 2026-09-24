@@ -6,6 +6,9 @@ function getContext() {
 }
 
 export function playSuccess() {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try { navigator.vibrate([40, 60, 40]); } catch {}
+  }
   const c = getContext();
   const osc = c.createOscillator();
   const gain = c.createGain();
@@ -25,6 +28,9 @@ export function playSuccess() {
 }
 
 export function playError() {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try { navigator.vibrate([100, 50, 100]); } catch {}
+  }
   const c = getContext();
   const osc = c.createOscillator();
   const gain = c.createGain();
@@ -43,6 +49,9 @@ export function playError() {
 }
 
 export function playBeep() {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try { navigator.vibrate(30); } catch {}
+  }
   const c = getContext();
   const osc = c.createOscillator();
   const gain = c.createGain();
