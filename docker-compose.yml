@@ -1,5 +1,7 @@
 services:
   # ── Homebox inventory backend ──
+  # UI: http://<host>:3101  (admin, API key creation, item management)
+  # API: also proxied via nginx at http://<host>:3100/api/*
   homebox:
     image: ghcr.io/sysadminsmedia/homebox:latest
     restart: always
@@ -11,7 +13,8 @@ services:
       - HBOX_AUTH_API_KEY_PEPPER=${HBOX_AUTH_API_KEY_PEPPER}
     volumes:
       - homebox-data:/data/
-    # No ports exposed — nginx proxies /api/* internally
+    ports:
+      - "3101:7745"
 
   # ── PWA frontend + reverse proxy ──
   frontend:
