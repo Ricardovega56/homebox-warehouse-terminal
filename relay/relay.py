@@ -1,6 +1,7 @@
 """
-Print Relay — Fetches label PNGs from Homebox, converts to native Brother QL
-raster commands, and pipes them directly to CUPS (-o raw).
+Print Relay & Companion Service —
+1. Fetches label PNGs from Homebox, converts to native Brother QL raster commands, and pipes to CUPS.
+2. Companion SQLite API for Par Levels, Dynamic Shopping List, and Cycle Count Audit logs.
 """
 
 import io
@@ -18,6 +19,8 @@ from pydantic import BaseModel
 from PIL import Image
 from brother_ql.conversion import convert
 from brother_ql.raster import BrotherQLRaster
+
+import database
 
 HOMEBOX_URL = os.environ.get("HOMEBOX_BASE_URL", "http://homebox:7745")
 HOMEBOX_TOKEN = os.environ.get("HOMEBOX_API_TOKEN", "")
@@ -47,7 +50,6 @@ def quantize_two_color(im: Image.Image) -> Image.Image:
 def prepare_image_for_label(im: Image.Image, label_type: str) -> Image.Image:
     """Resize/pad label image to match brother_ql requirements for the given label type."""
     if label_type == "29x90":
-        # Die-cut 29mm x 90mm label (991 x 306 dots in landscape)
         target_w, target_h = 991, 306
         scale = min(target_w / float(im.size[0]), target_h / float(im.size[1]))
         new_w = max(1, int(im.size[0] * scale))
@@ -59,7 +61,6 @@ def prepare_image_for_label(im: Image.Image, label_type: str) -> Image.Image:
         canvas.paste(resized, (offset_x, offset_y))
         return canvas
     else:
-        # Endless rolls (62mm: 62red or 62)
         target_w = 696
         if im.size[0] != target_w:
             scale = target_w / float(im.size[0])
@@ -72,6 +73,7 @@ client: httpx.AsyncClient = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global client
+    database.init_db()
     client = httpx.AsyncClient(
         base_url=HOMEBOX_URL,
         timeout=10.0,
@@ -79,13 +81,15 @@ async def lifespan(app: FastAPI):
     yield
     await client.aclose()
 
-app = FastAPI(title="Homebox Print Relay", lifespan=lifespan)
+app = FastAPI(title="Homebox Warehouse Companion & Print Relay", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST", "GET"],
+    allow_methods=["POST", "GET", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ── Print Models & Routes ──
 
 class PrintRequest(BaseModel):
     entityId: str
@@ -132,10 +136,108 @@ async def print_label(req: PrintRequest):
 
     return {"status": "printed", "entityId": req.entityId, "labelType": label_type}
 
+# ── Companion: Par Levels & Replenishment ──
+
+class ParLevelRequest(BaseModel):
+    entityId: str
+    minQuantity: float = 1.0
+    targetQuantity: float = 5.0
+    unit: str = "pcs"
+    supplierUrl: str | None = None
+
+@app.get("/companion/par-levels")
+def list_par_levels():
+    return database.get_all_par_levels()
+
+@app.post("/companion/par-levels")
+def set_par_level(req: ParLevelRequest):
+    database.set_par_level(
+        entity_id=req.entityId,
+        min_qty=req.minQuantity,
+        target_qty=req.targetQuantity,
+        unit=req.unit,
+        supplier_url=req.supplierUrl
+    )
+    return {"status": "saved", "entityId": req.entityId}
+
+@app.delete("/companion/par-levels/{entity_id}")
+def delete_par_level(entity_id: str):
+    database.delete_par_level(entity_id)
+    return {"status": "deleted", "entityId": entity_id}
+
+# ── Companion: Shopping List ──
+
+class ShoppingItemRequest(BaseModel):
+    name: str
+    quantityNeeded: float = 1.0
+    unit: str = "pcs"
+    entityId: str | None = None
+    source: str = "manual"
+
+class ShoppingItemUpdateRequest(BaseModel):
+    completed: bool
+
+@app.get("/companion/shopping-list")
+def list_shopping_items():
+    return database.get_shopping_items()
+
+@app.post("/companion/shopping-list")
+def add_shopping_item(req: ShoppingItemRequest):
+    item_id = database.add_shopping_item(
+        name=req.name,
+        quantity_needed=req.quantityNeeded,
+        unit=req.unit,
+        entity_id=req.entityId,
+        source=req.source
+    )
+    return {"status": "added", "id": item_id}
+
+@app.patch("/companion/shopping-list/{item_id}")
+def update_shopping_item(item_id: int, req: ShoppingItemUpdateRequest):
+    database.update_shopping_item(item_id, req.completed)
+    return {"status": "updated", "id": item_id, "completed": req.completed}
+
+@app.delete("/companion/shopping-list/{item_id}")
+def delete_shopping_item(item_id: int):
+    database.delete_shopping_item(item_id)
+    return {"status": "deleted", "id": item_id}
+
+@app.delete("/companion/shopping-list-clear-completed")
+def clear_completed_shopping():
+    database.clear_completed_shopping_items()
+    return {"status": "cleared"}
+
+# ── Companion: Cycle Count Audits ──
+
+class CycleCountLogRequest(BaseModel):
+    locationId: str
+    locationName: str
+    itemsExpected: int
+    itemsVerified: int
+    discrepancies: int
+    notes: str | None = None
+
+@app.post("/companion/cycle-counts")
+def log_cycle_count(req: CycleCountLogRequest):
+    audit_id = database.record_cycle_count(
+        location_id=req.locationId,
+        location_name=req.locationName,
+        items_expected=req.itemsExpected,
+        items_verified=req.itemsVerified,
+        discrepancies=req.discrepancies,
+        notes=req.notes
+    )
+    return {"status": "recorded", "id": audit_id}
+
+@app.get("/companion/cycle-counts")
+def list_cycle_counts():
+    return database.get_recent_cycle_counts()
+
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
+        "service": "hwt-companion-relay",
         "printer": PRINTER_NAME,
         "model": PRINTER_MODEL,
         "labelType": LABEL_TYPE,

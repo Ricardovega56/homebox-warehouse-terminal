@@ -1,39 +1,82 @@
 @import 'tailwindcss';
 
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
 body {
-  background-color: #000;
-  color: #fff;
+  background-color: #090a0f;
+  color: #f1f5f9;
   overflow: hidden;
   height: 100dvh;
   margin: 0;
   padding: 0;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-@keyframes pulse-green {
-  0% { background-color: rgba(34, 197, 94, 0); }
-  20% { background-color: rgba(34, 197, 94, 0.8); }
-  100% { background-color: rgba(34, 197, 94, 0); }
+/* Custom scrollbars for inventory lists */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090a0f;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2433;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #333c54;
 }
 
-@keyframes pulse-red {
-  0% { background-color: rgba(239, 68, 68, 0); }
-  20% { background-color: rgba(239, 68, 68, 0.8); }
-  100% { background-color: rgba(239, 68, 68, 0); }
+/* Tactile Terminal Component Styles */
+.terminal-surface {
+  background-color: #11141d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.flash-green {
-  animation: pulse-green 1.5s ease-out forwards;
+.terminal-card {
+  background-color: #151824;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
 }
 
-.flash-red {
-  animation: pulse-red 1.5s ease-out forwards;
+.terminal-card-hover {
+  transition: all 150ms ease;
+}
+.terminal-card-hover:hover {
+  background-color: #1a1e2d;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.terminal-card-hover:active {
+  transform: scale(0.99);
 }
 
-.scan-prompt-text {
-  font-size: 48px;
-  line-height: 1.2;
+.terminal-input {
+  background-color: #0c0e15;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f8fafc;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.terminal-input:focus {
+  outline: none;
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px #f59e0b;
+}
+
+.btn-tactile {
+  transition: transform 100ms ease, background-color 150ms ease, opacity 150ms ease;
+}
+.btn-tactile:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 #app {

@@ -1,21 +1,24 @@
 <script lang="ts">
   import ScanPrompt from '../components/ScanPrompt.svelte';
-  import StatusFlash from '../components/StatusFlash.svelte';
   import ItemCard from '../components/ItemCard.svelte';
   import { resolveScan, formatScanError } from '../lib/resolver';
   import { getApi } from '../lib/store.svelte';
   import { playSuccess, playError, playBeep } from '../lib/audio';
+  import { notificationHub } from '../lib/notifications.svelte';
   import type { Entity } from '../lib/api';
+  import { ArrowRightLeft, X, Check, Loader2 } from 'lucide-svelte';
 
-  type PutAwayPhase = 'scan-source' | 'scan-destination' | 'committing' | 'success' | 'error';
+  type PutAwayPhase = 'scan-source' | 'scan-destination' | 'committing';
   let phase = $state<PutAwayPhase>('scan-source');
   let currentSource = $state<Entity | null>(null);
   let sourceType = $state<'item' | 'location'>('item');
   let currentDestination = $state<Entity | null>(null);
-  let actionMessage = $state('');
-  let errorMessage = $state('');
 
-  function reset() {
+  const { onTriggerCamera } = $props<{
+    onTriggerCamera?: () => void;
+  }>();
+
+  export function reset() {
     phase = 'scan-source';
     currentSource = null;
     currentDestination = null;
@@ -23,11 +26,6 @@
 
   export async function handleScan(raw: string) {
     if (phase === 'committing') return;
-    
-    // Auto reset if scanning during success/error display
-    if (phase === 'success' || phase === 'error') {
-      reset();
-    }
 
     playBeep();
     const api = getApi();
@@ -42,6 +40,7 @@
       currentSource = result.entity;
       sourceType = result.type;
       phase = 'scan-destination';
+      notificationHub.show('info', 'SOURCE IDENTIFIED', result.entity.name, 1200);
     } else if (phase === 'scan-destination') {
       if (result.type === 'unknown' || !result.entity) {
         handleError(formatScanError(raw, 'location'));
@@ -74,66 +73,64 @@
       const api = getApi();
       await api.patchEntity(currentSource.id, { parentId: currentDestination.id });
       
-      if (sourceType === 'location') {
-        actionMessage = `RELOCATED\n${srcName} → ${destName}`;
-      } else {
-        actionMessage = `MOVED TO\n${destName}`;
-      }
-
       playSuccess();
-      phase = 'success';
-      setTimeout(() => {
-        if (phase === 'success') {
-          reset();
-        }
-      }, 1600);
+      notificationHub.show(
+        'success',
+        sourceType === 'location' ? 'RELOCATED LOCATION' : 'STORED IN BIN',
+        `${srcName} ➔ ${destName}`,
+        2400
+      );
+      reset();
     } catch (e: any) {
-      handleError(e.message || 'Failed to move');
+      handleError(e.message || 'Failed to move item');
     }
   }
 
   function handleError(msg: string) {
     playError();
-    errorMessage = msg;
-    phase = 'error';
-    setTimeout(() => {
-      if (phase === 'error') {
-        phase = currentSource ? 'scan-destination' : 'scan-source';
-      }
-    }, 2800);
+    notificationHub.show('error', 'SCAN ERROR', msg, 3200);
   }
 </script>
 
-<div class="flex-1 flex flex-col relative">
-  {#if phase === 'success'}
-    <StatusFlash color="green" message={actionMessage} />
-  {/if}
-  {#if phase === 'error'}
-    <StatusFlash color="red" message={errorMessage} />
-  {/if}
-
-  {#if phase === 'scan-source' || (phase === 'error' && !currentSource)}
-    <ScanPrompt icon="📦" label="Scan Item or Location to Move" />
+<div class="flex-1 flex flex-col relative overflow-hidden bg-[#090a0f]">
+  {#if phase === 'scan-source'}
+    <ScanPrompt 
+      label="Scan Item to Move" 
+      sublabel="Point Tera scanner at any Item QR or barcode"
+      iconType="scan"
+      onManualScan={onTriggerCamera}
+    />
   {:else if currentSource}
-    <div class="flex-1 flex flex-col">
+    <div class="flex-1 flex flex-col justify-between">
+      <!-- Active Source Entity Header -->
       <div class="relative">
         <ItemCard entity={currentSource} />
         <button
           type="button"
           onclick={reset}
-          class="absolute top-7 right-7 bg-gray-700/90 hover:bg-gray-600 text-gray-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+          class="btn-tactile absolute top-6 right-6 bg-white/[0.08] hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-white/[0.1] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
         >
-          ✕ Cancel
+          <X class="w-3.5 h-3.5" />
+          <span>CANCEL</span>
         </button>
       </div>
-      {#if phase === 'scan-destination' || (phase === 'error' && currentSource)}
-        <ScanPrompt 
-          icon="📍" 
-          label={sourceType === 'location' ? 'Scan New Parent Location' : 'Scan Destination Bin / Shelf'} 
-        />
-      {:else if phase === 'committing'}
-        <ScanPrompt icon="⏳" label="Moving..." />
-      {/if}
+
+      <!-- Destination Prompt / Committing -->
+      <div class="flex-1 flex flex-col items-center justify-center p-4">
+        {#if phase === 'scan-destination'}
+          <ScanPrompt 
+            label={sourceType === 'location' ? 'Scan New Parent Location' : 'Scan Destination Bin / Shelf'} 
+            sublabel="Scan target QR code to commit move"
+            iconType="location"
+            onManualScan={onTriggerCamera}
+          />
+        {:else if phase === 'committing'}
+          <div class="flex flex-col items-center gap-3">
+            <Loader2 class="w-10 h-10 text-amber-400 animate-spin" />
+            <span class="font-mono text-xs uppercase tracking-wider text-slate-400">Committing relocation...</span>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>

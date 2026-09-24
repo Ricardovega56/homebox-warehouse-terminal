@@ -154,9 +154,8 @@ export class HomeboxApi {
   }
 
   async listLocations(): Promise<Entity[]> {
-    const res = await this.fetchApi<any>(`/api/v1/entities?pageSize=1000`);
-    const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
-    return items.filter(e => (e.entityType ? e.entityType.isLocation : true));
+    const res = await this.fetchApi<any>(`/api/v1/entities?isLocation=true&pageSize=1000`);
+    return Array.isArray(res) ? res : (res?.items ?? []);
   }
 
   async createLocation(data: { name: string; parentId?: string; description?: string }): Promise<Entity> {
@@ -176,6 +175,24 @@ export class HomeboxApi {
   async searchEntities(query: string): Promise<Entity[]> {
     const res = await this.fetchApi<any>(`/api/v1/entities?q=${encodeURIComponent(query)}`);
     return Array.isArray(res) ? res : (res?.items ?? []);
+  }
+
+  async listItems(): Promise<Entity[]> {
+    const res = await this.fetchApi<any>(`/api/v1/entities?pageSize=1000`);
+    const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
+    return items.filter(e => (e.entityType ? !e.entityType.isLocation : true));
+  }
+
+  async getItemsInLocation(locationId: string): Promise<Entity[]> {
+    try {
+      const res = await this.fetchApi<any>(`/api/v1/entities?parentId=${encodeURIComponent(locationId)}&pageSize=1000`);
+      const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
+      if (items.length > 0) return items;
+    } catch {}
+    // Fallback: fetch all and filter
+    const res = await this.fetchApi<any>(`/api/v1/entities?pageSize=1000`);
+    const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
+    return items.filter(e => e.parent?.id === locationId || e.location?.id === locationId);
   }
 
   async getStatus(): Promise<any> {

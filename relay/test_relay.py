@@ -153,3 +153,67 @@ def test_print_label_dk1201_diecut_29x90(mock_popen, mock_get):
     assert response.status_code == 200
     assert response.json()["labelType"] == "29x90"
     assert mock_popen.call_args[0][0] == ["lp", "-d", "QL-800", "-o", "raw"]
+
+def test_companion_par_levels():
+    with TestClient(app) as client:
+        # Create par level
+        res = client.post("/companion/par-levels", json={
+            "entityId": "test-entity-1",
+            "minQuantity": 2.0,
+            "targetQuantity": 10.0,
+            "unit": "boxes"
+        })
+        assert res.status_code == 200
+        assert res.json()["status"] == "saved"
+
+        # List par levels
+        list_res = client.get("/companion/par-levels")
+        assert list_res.status_code == 200
+        items = list_res.json()
+        match = next((i for i in items if i["entity_id"] == "test-entity-1"), None)
+        assert match is not None
+        assert match["min_quantity"] == 2.0
+        assert match["target_quantity"] == 10.0
+
+        # Delete par level
+        del_res = client.delete("/companion/par-levels/test-entity-1")
+        assert del_res.status_code == 200
+
+def test_companion_shopping_list():
+    with TestClient(app) as client:
+        # Add item
+        add_res = client.post("/companion/shopping-list", json={
+            "name": "M4 Hex Nuts",
+            "quantityNeeded": 50.0,
+            "unit": "pcs",
+            "source": "manual"
+        })
+        assert add_res.status_code == 200
+        item_id = add_res.json()["id"]
+
+        # Toggle item
+        patch_res = client.patch(f"/companion/shopping-list/{item_id}", json={"completed": True})
+        assert patch_res.status_code == 200
+        assert patch_res.json()["completed"] is True
+
+        # Clear completed
+        clear_res = client.delete("/companion/shopping-list-clear-completed")
+        assert clear_res.status_code == 200
+
+def test_companion_cycle_counts():
+    with TestClient(app) as client:
+        log_res = client.post("/companion/cycle-counts", json={
+            "locationId": "loc-bin-1",
+            "locationName": "BIN-A1-01",
+            "itemsExpected": 5,
+            "itemsVerified": 5,
+            "discrepancies": 0,
+            "notes": "All items matched"
+        })
+        assert log_res.status_code == 200
+        assert log_res.json()["status"] == "recorded"
+
+        list_res = client.get("/companion/cycle-counts")
+        assert list_res.status_code == 200
+        assert len(list_res.json()) >= 1
+
