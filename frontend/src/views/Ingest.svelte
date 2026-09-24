@@ -105,13 +105,23 @@
         await api.uploadAttachment(newEntity.id, blob, selectedFile.name || 'photo.jpg', true);
       }
 
-      // Fire print request via relay
+      // Fire print request via relay and verify response
       const relayUrl = config.relayUrl || '/relay';
-      fetch(`${relayUrl}/print`, {
+      const printRes = await fetch(`${relayUrl}/print`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityId: newEntity.id }),
-      }).catch((e) => console.error('Relay print error:', e));
+        body: JSON.stringify({
+          entityId: newEntity.id,
+          token: config.token,
+          media: '62X1',
+        }),
+      });
+
+      if (!printRes.ok) {
+        const errJson = await printRes.json().catch(() => null);
+        const detail = errJson?.detail || `HTTP ${printRes.status}`;
+        throw new Error(`Item saved, but printing failed:\n${detail}`);
+      }
 
       lastItemName = newEntity.name;
       playSuccess();
@@ -132,7 +142,7 @@
       viewState = 'error';
       setTimeout(() => {
         if (viewState === 'error') viewState = 'ready';
-      }, 2500);
+      }, 3500);
     }
   }
 
@@ -162,11 +172,21 @@
       lastItemName = result.entity.name;
 
       const relayUrl = config.relayUrl || '/relay';
-      fetch(`${relayUrl}/print`, {
+      const printRes = await fetch(`${relayUrl}/print`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityId: result.entity.id }),
-      }).catch((e) => console.error('Relay error', e));
+        body: JSON.stringify({
+          entityId: result.entity.id,
+          token: config.token,
+          media: '62X1',
+        }),
+      });
+
+      if (!printRes.ok) {
+        const errJson = await printRes.json().catch(() => null);
+        const detail = errJson?.detail || `HTTP ${printRes.status}`;
+        throw new Error(`Item moved, but printing failed:\n${detail}`);
+      }
 
       playSuccess();
       viewState = 'success';
@@ -179,7 +199,7 @@
       viewState = 'error';
       setTimeout(() => {
         if (viewState === 'error') viewState = 'ready';
-      }, 1500);
+      }, 3500);
     }
   }
 </script>

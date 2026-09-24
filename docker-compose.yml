@@ -34,6 +34,7 @@ services:
       - HOMEBOX_API_TOKEN=${HOMEBOX_API_TOKEN}
       - PRINTER_NAME=${PRINTER_NAME:-QL-800}
       - CUPS_SERVER=${CUPS_SERVER:-}
+      - MEDIA_SIZE=${MEDIA_SIZE:-62X1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

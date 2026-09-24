@@ -25,8 +25,30 @@ def test_print_label_success(mock_subprocess, mock_get):
         response = client.post("/print", json={"entityId": "12345"})
         
     assert response.status_code == 200
-    assert response.json() == {"status": "printed", "entityId": "12345"}
+    assert response.json()["status"] == "printed"
+    assert response.json()["entityId"] == "12345"
     assert mock_subprocess.call_args[0][0][:4] == ["lp", "-d", "QL-800", "-o"]
+    assert "media=62X1" in mock_subprocess.call_args[0][0]
+
+@patch("relay.httpx.AsyncClient.get")
+@patch("relay.subprocess.run")
+def test_print_label_with_token_and_media(mock_subprocess, mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = b"fake png data"
+    mock_get.return_value = mock_resp
+
+    mock_subprocess_result = MagicMock()
+    mock_subprocess_result.returncode = 0
+    mock_subprocess.return_value = mock_subprocess_result
+
+    with TestClient(app) as client:
+        response = client.post("/print", json={"entityId": "12345", "token": "hb_mytoken", "media": "62X1"})
+
+    assert response.status_code == 200
+    assert response.json()["media"] == "62X1"
+    assert mock_get.call_args[1]["headers"]["Authorization"] == "Bearer hb_mytoken"
+    assert "media=62X1" in mock_subprocess.call_args[0][0]
 
 @patch("relay.httpx.AsyncClient.get")
 @patch("relay.subprocess.run")

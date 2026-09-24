@@ -21,6 +21,7 @@ HOMEBOX_URL = os.environ.get("HOMEBOX_BASE_URL", "http://homebox:7745")
 HOMEBOX_TOKEN = os.environ.get("HOMEBOX_API_TOKEN", "")
 PRINTER_NAME = os.environ.get("PRINTER_NAME", "QL-800")
 CUPS_SERVER = os.environ.get("CUPS_SERVER", "")
+MEDIA_SIZE = os.environ.get("MEDIA_SIZE", "62X1")
 
 client: httpx.AsyncClient = None
 
@@ -29,7 +30,6 @@ async def lifespan(app: FastAPI):
     global client
     client = httpx.AsyncClient(
         base_url=HOMEBOX_URL,
-        headers={"Authorization": f"Bearer {HOMEBOX_TOKEN}"},
         timeout=10.0,
     )
     yield
@@ -45,11 +45,15 @@ app.add_middleware(
 
 class PrintRequest(BaseModel):
     entityId: str
+    token: str | None = None
+    media: str | None = None
 
 @app.post("/print")
 async def print_label(req: PrintRequest):
     # Fetch label PNG from Homebox
-    resp = await client.get(f"/api/v1/labelmaker/entity/{req.entityId}")
+    auth_token = req.token or HOMEBOX_TOKEN
+    headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+    resp = await client.get(f"/api/v1/labelmaker/entity/{req.entityId}", headers=headers)
     if resp.status_code != 200:
         raise HTTPException(502, f"Homebox returned {resp.status_code}: {resp.text}")
 
@@ -59,7 +63,10 @@ async def print_label(req: PrintRequest):
         tmp_path = f.name
 
     try:
-        cmd = ["lp", "-d", PRINTER_NAME, "-o", "media=29x90mm"]
+        media = req.media or MEDIA_SIZE
+        cmd = ["lp", "-d", PRINTER_NAME]
+        if media:
+            cmd.extend(["-o", f"media={media}"])
         if CUPS_SERVER:
             cmd.extend(["-h", CUPS_SERVER])
         cmd.append(tmp_path)
@@ -73,8 +80,8 @@ async def print_label(req: PrintRequest):
     finally:
         os.unlink(tmp_path)
 
-    return {"status": "printed", "entityId": req.entityId}
+    return {"status": "printed", "entityId": req.entityId, "media": media}
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "printer": PRINTER_NAME, "cups_server": CUPS_SERVER or "local"}
+    return {"status": "ok", "printer": PRINTER_NAME, "cups_server": CUPS_SERVER or "local", "media": MEDIA_SIZE}
