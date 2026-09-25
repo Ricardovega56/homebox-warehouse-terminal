@@ -4,13 +4,13 @@ Live task tracking on GitHub: **[GitHub Issues](https://github.com/Ricardovega56
 
 ---
 
-## 🎯 Milestone 1: Frictionless Intake Engine V2 (Active Focus)
+## ✅ Milestone 1: Frictionless Intake Engine V2 (Completed)
 *Goal: Eliminate friction so sorting messy boxes, Amazon deliveries, and garage bins takes <5 seconds per item.*
 
-- [ ] **[#1] Global Barcode (UPC/EAN) Auto-Resolution**: Scan manufacturer barcodes on retail boxes (screws, tools, consumables) $\rightarrow$ auto-fetches name, brand, and photo from Open Food Facts / Barcode Lookup.
-- [ ] **[#2] Pre-Printed Serialized Label Mode ("Slap & Bind")**: Print 20–50 blank labels in batch $\rightarrow$ slap label on box $\rightarrow$ scan label $\rightarrow$ quick-name $\rightarrow$ drop in bin (zero printer wait time).
-- [ ] **[#3] Continuous Batch Delivery Hopper**: Multi-package receiving stream into an intake hopper with 1-tap strip printing.
-- [ ] **[#4] Voice-to-Item Quick Dictation**: Web Speech API hands-free capture (*"Box of 2-inch drywall screws, quantity 100"*).
+- [x] **[#1] Global Barcode (UPC/EAN) Auto-Resolution**: Scan manufacturer barcodes on retail boxes (screws, tools, consumables) $\rightarrow$ auto-fetches name, brand, and photo from Open Food Facts / UPCitemdb via companion proxy.
+- [x] **[#2] Pre-Printed Serialized Label Mode ("Slap & Bind")**: Print 20–50 blank labels in batch $\rightarrow$ slap label on box $\rightarrow$ scan label $\rightarrow$ quick-name $\rightarrow$ drop in bin (zero printer wait time).
+- [x] **[#3] Continuous Batch Delivery Hopper**: Multi-package receiving stream into an intake hopper with 1-tap strip printing or store-all.
+- [x] **[#4] Voice-to-Item Quick Dictation**: Web Speech API hands-free capture (*"Box of 2-inch drywall screws, quantity 100"* -> auto extracts name & qty).
 
 ---
 
