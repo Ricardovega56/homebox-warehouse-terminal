@@ -50,7 +50,7 @@ describe('Barcode Lookup Module', () => {
           source: 'OpenFoodFacts'
         })
       });
-      global.fetch = mockFetch;
+      vi.stubGlobal('fetch', mockFetch);
 
       const res = await lookupCommercialBarcode('025293000987');
       expect(res).not.toBeNull();
@@ -74,7 +74,7 @@ describe('Barcode Lookup Module', () => {
             }
           })
         });
-      global.fetch = mockFetch;
+      vi.stubGlobal('fetch', mockFetch);
 
       const res = await lookupCommercialBarcode('025293000987');
       expect(res).not.toBeNull();

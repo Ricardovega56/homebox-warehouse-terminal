@@ -298,6 +298,35 @@
       Connect your Tera 0013 directly via <strong>Web Bluetooth (BLE)</strong>. Android will never hide your on-screen keyboard, and barcode scans stream instantly without wedge delays.
     </p>
 
+    <!-- Bluetooth Device Prefix Filter -->
+    <div class="space-y-1.5 pt-1">
+      <div class="flex items-center justify-between">
+        <label for="ble-prefix" class="text-[11px] font-semibold text-slate-300 uppercase flex items-center gap-1.5">
+          <span>Scanner BLE Name Filter</span>
+        </label>
+        {#if config.blePrefix}
+          <button
+            type="button"
+            onclick={() => { config.blePrefix = ''; saveConfig(); }}
+            class="text-[10px] text-amber-400 hover:text-amber-300 underline cursor-pointer"
+          >
+            Clear (Show All)
+          </button>
+        {/if}
+      </div>
+      <input
+        id="ble-prefix"
+        type="text"
+        bind:value={config.blePrefix}
+        onchange={() => saveConfig()}
+        placeholder="e.g. Tera or Barcode"
+        class="terminal-input w-full rounded-xl p-2.5 text-xs text-white placeholder-slate-600 font-mono"
+      />
+      <p class="text-[10px] text-slate-500">
+        Limits the Android Bluetooth pairing list to devices matching this prefix. Automatically remembers your device.
+      </p>
+    </div>
+
     <div class="pt-1">
       {#if bleScanner.state.isConnected}
         <button
@@ -315,7 +344,7 @@
           class="btn-tactile w-full bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 font-bold py-2.5 px-4 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
         >
           <Bluetooth class="w-4 h-4" />
-          <span>{bleScanner.state.isConnecting ? 'PAIRING...' : 'PAIR TERA 0013 VIA BLE'}</span>
+          <span>{bleScanner.state.isConnecting ? 'PAIRING...' : (config.blePrefix ? `PAIR ${config.blePrefix.toUpperCase()} SCANNER` : 'PAIR SCANNER VIA BLE')}</span>
         </button>
       {/if}
     </div>

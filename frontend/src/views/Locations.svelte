@@ -372,13 +372,26 @@
           disabled={isProcessing || isLoadingLocations}
           class="terminal-input w-full rounded-xl px-3.5 py-3 text-xs font-mono text-white"
         >
-          <option value="">{isLoadingLocations ? '⏳ Loading warehouse locations...' : '-- None (Top Level) --'}</option>
-          {#each locations as loc (loc.id)}
-            <option value={loc.id}>
-              {loc.name} {loc.parent ? `(${loc.parent.name})` : ''}
-            </option>
-          {/each}
+          <option value="">{isLoadingLocations ? '⏳ Loading warehouse locations...' : '-- None (Top Level Location) --'}</option>
+          {#if locations.length > 0}
+            <optgroup label="Available Parent Locations ({locations.length})">
+              {#each locations as loc (loc.id)}
+                <option value={loc.id}>
+                  {loc.name} {loc.parent ? `(${loc.parent.name})` : ''}
+                </option>
+              {/each}
+            </optgroup>
+          {/if}
         </select>
+        {#if locations.length > 0}
+          <p class="text-[10px] text-emerald-400/80 font-mono mt-1 flex items-center gap-1">
+            <span>✓</span> {locations.length} warehouse locations ready for nesting
+          </p>
+        {:else if !isLoadingLocations}
+          <p class="text-[10px] text-slate-500 font-mono mt-1">
+            No existing locations found. This bin will be created at root level.
+          </p>
+        {/if}
       </div>
 
       <!-- Description Input -->

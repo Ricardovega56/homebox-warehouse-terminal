@@ -34,6 +34,7 @@ export interface HomeboxConfig {
   receivingLocationName: string;
   stagingLocationName: string;
   labelType?: string;
+  blePrefix?: string;
 }
 
 export class HomeboxApi {
