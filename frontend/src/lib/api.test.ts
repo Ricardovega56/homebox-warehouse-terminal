@@ -201,4 +201,52 @@ describe('HomeboxApi Client Contract Tests', () => {
 
     await expect(api.getStatus()).rejects.toThrow('API Error: 500 Internal Server Error');
   });
+
+  describe('getItemsInLocation', () => {
+    it('strictly filters items to the requested location even if backend returns all entities', async () => {
+      // Simulates Homebox ignoring ?parentId=... and returning all entities across all bins
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          items: [
+            { id: 'item-in-bin-1', name: 'M3 Screws', parent: { id: 'bin-1', name: 'Bin 1' } },
+            { id: 'item-in-bin-2', name: 'WD40 Spray', parent: { id: 'bin-2', name: 'Bin 2' } },
+            { id: 'item-in-bin-1-loc', name: 'Soldering Iron', location: { id: 'bin-1', name: 'Bin 1' } },
+            { id: 'bin-1', name: 'Bin 1', entityType: { id: 'type-loc', isLocation: true } },
+            { id: 'sub-bin', name: 'Sub Bin', parent: { id: 'bin-1', name: 'Bin 1' }, entityType: { id: 'type-loc', isLocation: true } }
+          ]
+        })
+      });
+
+      const items = await api.getItemsInLocation('bin-1');
+
+      expect(items).toHaveLength(2);
+      expect(items.map(i => i.id)).toEqual(['item-in-bin-1', 'item-in-bin-1-loc']);
+      expect(items.find(i => i.id === 'item-in-bin-2')).toBeUndefined();
+      expect(items.find(i => i.id === 'bin-1')).toBeUndefined();
+      expect(items.find(i => i.id === 'sub-bin')).toBeUndefined();
+    });
+
+    it('returns empty array when no items exist in the selected location', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          items: [
+            { id: 'item-1', name: 'Item 1', parent: { id: 'bin-other' } }
+          ]
+        })
+      });
+
+      const items = await api.getItemsInLocation('empty-bin');
+      expect(items).toEqual([]);
+    });
+
+    it('returns empty array if locationId is falsy', async () => {
+      const items = await api.getItemsInLocation('');
+      expect(items).toEqual([]);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
 });

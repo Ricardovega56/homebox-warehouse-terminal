@@ -219,15 +219,34 @@ export class HomeboxApi {
   }
 
   async getItemsInLocation(locationId: string): Promise<Entity[]> {
+    if (!locationId) return [];
+
+    let rawItems: Entity[] = [];
     try {
       const res = await this.fetchApi<any>(`/api/v1/entities?parentId=${encodeURIComponent(locationId)}&pageSize=1000`);
-      const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
-      if (items.length > 0) return items;
+      rawItems = Array.isArray(res) ? res : (res?.items ?? []);
     } catch {}
-    // Fallback: fetch all and filter
-    const res = await this.fetchApi<any>(`/api/v1/entities?pageSize=1000`);
-    const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
-    return items.filter(e => e.parent?.id === locationId || e.location?.id === locationId);
+
+    if (rawItems.length === 0) {
+      try {
+        const res = await this.fetchApi<any>(`/api/v1/entities?pageSize=1000`);
+        rawItems = Array.isArray(res) ? res : (res?.items ?? []);
+      } catch (e) {
+        console.warn('Failed to load entities for getItemsInLocation', e);
+        return [];
+      }
+    }
+
+    // Strictly filter: only items whose parent or location matches locationId, excluding locations
+    return rawItems.filter(e => {
+      const isLocation = e.entityType?.isLocation || (e as any).isLocation === true || (e as any).is_location === true;
+      if (isLocation) return false;
+      if (e.id === locationId) return false;
+
+      const pId = e.parent?.id || (e as any).parentId || (e as any).parent_id;
+      const lId = e.location?.id || (e as any).locationId || (e as any).location_id;
+      return pId === locationId || lId === locationId;
+    });
   }
 
   async getStatus(): Promise<any> {
