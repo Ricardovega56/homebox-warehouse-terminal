@@ -217,3 +217,28 @@ def test_companion_cycle_counts():
         assert list_res.status_code == 200
         assert len(list_res.json()) >= 1
 
+@patch("httpx.AsyncClient.get")
+def test_companion_barcode_lookup_openfoodfacts(mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "status": 1,
+        "product": {
+            "product_name": "Organic Almond Milk",
+            "brands": "Silk",
+            "generic_name": "Almond beverage",
+            "image_url": "https://example.com/almond.jpg"
+        }
+    }
+    mock_get.return_value = mock_resp
+
+    with TestClient(app) as client:
+        res = client.get("/companion/barcode-lookup/025293000987")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["found"] is True
+        assert data["name"] == "Organic Almond Milk"
+        assert data["brand"] == "Silk"
+        assert data["source"] == "OpenFoodFacts"
+
+

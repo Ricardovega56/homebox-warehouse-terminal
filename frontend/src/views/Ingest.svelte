@@ -7,6 +7,8 @@
   import { playSuccess, playError, playBeep } from '../lib/audio';
   import { printLabel } from '../lib/printer';
   import { notificationHub } from '../lib/notifications.svelte';
+  import { isCommercialBarcode, lookupCommercialBarcode, fetchProductImageBlob } from '../lib/barcodeLookup';
+  import { voiceDictation } from '../lib/speech';
   import type { Entity } from '../lib/api';
   import { 
     PackagePlus, 
@@ -21,15 +23,39 @@
     Folder, 
     Star, 
     Search, 
-    Loader2 
+    Tag,
+    Barcode,
+    Loader2,
+    Mic,
+    MicOff,
+    Layers,
+    Trash2,
+    CheckCircle2,
+    ArrowRight,
+    Sparkles,
+    Check,
+    RefreshCw
   } from 'lucide-svelte';
 
-  type Mode = 'create' | 'scan';
+  type Mode = 'create' | 'slap-bind' | 'hopper' | 'scan';
   let mode = $state<Mode>('create');
   let isProcessing = $state(false);
   let isPrinting = $state(false);
+  let isLookingUpBarcode = $state(false);
 
-  // Form fields for intake
+  // Manual Barcode Entry
+  let manualBarcodeInput = $state('');
+  let showManualBarcodeModal = $state(false);
+
+  // Voice dictation
+  let isListeningVoice = $state(false);
+  let voiceInterimText = $state('');
+
+  // Slap & Bind State
+  let boundAssetId = $state<string | null>(null);
+  let boundEntity = $state<Entity | null>(null);
+
+  // Form fields for single intake
   let itemName = $state('');
   let itemQty = $state(1);
   let itemDescription = $state('');
@@ -43,6 +69,22 @@
   let modalSearchQuery = $state('');
   let modalSelectedParentId = $state<string | null>(null);
   let isLoadingLocations = $state(false);
+
+  // Hopper (Batch Inbound) State
+  export interface HopperItem {
+    id: string;
+    name: string;
+    quantity: number;
+    barcode?: string;
+    brand?: string;
+    description?: string;
+    imageUrl?: string;
+    status: 'pending' | 'processing' | 'done' | 'failed';
+    createdEntityId?: string;
+  }
+  let hopper = $state<HopperItem[]>([]);
+  let isProcessingHopper = $state(false);
+  let hopperProgress = $state({ current: 0, total: 0 });
 
   const { onTriggerCamera } = $props<{
     onTriggerCamera?: () => void;
@@ -180,6 +222,145 @@
     }
   }
 
+  // Voice Dictation Handler
+  function toggleVoiceDictation() {
+    if (isListeningVoice) {
+      voiceDictation.stop();
+      isListeningVoice = false;
+      voiceInterimText = '';
+      return;
+    }
+
+    if (!voiceDictation.isAvailable()) {
+      notificationHub.show('warning', 'NOT SUPPORTED', 'Voice dictation requires Chrome, Edge, or Android.');
+      return;
+    }
+
+    isListeningVoice = true;
+    voiceInterimText = '';
+    playBeep();
+
+    const started = voiceDictation.startListening(
+      (interim) => {
+        voiceInterimText = interim;
+      },
+      (parsed) => {
+        if (parsed.itemName) {
+          if (mode === 'hopper') {
+            addToHopper({
+              id: Math.random().toString(36).substring(2, 9),
+              name: parsed.itemName,
+              quantity: parsed.quantity || 1,
+              status: 'pending'
+            });
+            playSuccess();
+            notificationHub.show('success', 'ADDED TO HOPPER', `${parsed.itemName} (Qty: ${parsed.quantity || 1})`, 2500);
+          } else {
+            itemName = parsed.itemName;
+            if (parsed.quantity > 1) {
+              itemQty = parsed.quantity;
+            }
+            playSuccess();
+            notificationHub.show('success', 'VOICE RECOGNIZED', `${itemName} (Qty: ${itemQty})`, 2500);
+          }
+        }
+      },
+      (error) => {
+        notificationHub.show('error', 'VOICE ERROR', error, 3000);
+        playError();
+      },
+      () => {
+        isListeningVoice = false;
+        voiceInterimText = '';
+      }
+    );
+
+    if (!started) {
+      isListeningVoice = false;
+    }
+  }
+
+  // Barcode Auto-Lookup Handler (UPC/EAN)
+  async function resolveCommercialBarcode(code: string) {
+    const clean = code.trim();
+    if (!clean) return;
+
+    isLookingUpBarcode = true;
+    notificationHub.show('info', 'LOOKING UP UPC...', clean);
+    playBeep();
+
+    try {
+      const product = await lookupCommercialBarcode(clean);
+      if (product) {
+        if (mode === 'hopper') {
+          addToHopper({
+            id: Math.random().toString(36).substring(2, 9),
+            name: product.name,
+            quantity: 1,
+            barcode: clean,
+            brand: product.brand,
+            description: product.description,
+            imageUrl: product.imageUrl,
+            status: 'pending'
+          });
+          playSuccess();
+          notificationHub.show('success', 'ADDED TO HOPPER', `${product.name} (${product.source})`, 3000);
+          return;
+        }
+
+        itemName = product.name;
+        const details = [
+          product.brand ? `Brand: ${product.brand}` : '',
+          product.description ? `Category: ${product.description}` : '',
+          `UPC: ${clean}`
+        ].filter(Boolean).join('\n');
+        itemDescription = details;
+
+        if (product.imageUrl && photos.length < MAX_PHOTOS) {
+          try {
+            const blob = await fetchProductImageBlob(product.imageUrl);
+            if (blob) {
+              const file = new File([blob], `${clean}.jpg`, { type: blob.type || 'image/jpeg' });
+              photos = [{
+                id: Math.random().toString(36).substring(2, 9),
+                file,
+                previewUrl: URL.createObjectURL(blob),
+              }, ...photos];
+            }
+          } catch (e) {
+            console.warn('Failed to attach product thumbnail:', e);
+          }
+        }
+
+        playSuccess();
+        notificationHub.show('success', 'BARCODE RESOLVED', `${product.name} (${product.source})`, 3000);
+      } else {
+        if (mode === 'hopper') {
+          addToHopper({
+            id: Math.random().toString(36).substring(2, 9),
+            name: `UPC ${clean}`,
+            quantity: 1,
+            barcode: clean,
+            status: 'pending'
+          });
+          playSuccess();
+          notificationHub.show('warning', 'UNKNOWN UPC ADDED', `Added ${clean} to hopper. Rename when ready.`, 3500);
+        } else {
+          itemDescription = (itemDescription ? itemDescription + '\n' : '') + `UPC: ${clean}`;
+          playError();
+          notificationHub.show('warning', 'UNKNOWN UPC', `Barcode ${clean} added to description. Enter name manually.`, 4000);
+        }
+      }
+    } catch (e: any) {
+      playError();
+      notificationHub.show('error', 'LOOKUP FAILED', e.message || 'Lookup failed');
+    } finally {
+      isLookingUpBarcode = false;
+      showManualBarcodeModal = false;
+      manualBarcodeInput = '';
+    }
+  }
+
   interface AttachedPhoto {
     id: string;
     file: File;
@@ -237,10 +418,11 @@
     for (const p of photos) {
       URL.revokeObjectURL(p.previewUrl);
     }
+    voiceDictation.stop();
   });
 
-  async function compressImage(file: File): Promise<Blob> {
-    if (!file.type.startsWith('image/')) return file;
+  async function compressImage(file: File | Blob): Promise<Blob> {
+    if (file.type && !file.type.startsWith('image/')) return file;
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -277,6 +459,7 @@
     });
   }
 
+  // Ingest Execution (Standard & Slap-and-Bind)
   async function executeCreate(shouldPrint: boolean, locOverride?: Entity | null) {
     if (!itemName.trim() || isProcessing) return;
 
@@ -295,26 +478,44 @@
       const parentId = activeTarget ? activeTarget.id : config.receivingLocationId;
       const destinationName = activeTarget ? activeTarget.name : (config.receivingLocationName || '_RECEIVING');
 
-      const newEntity = await api.createEntity({
-        name: itemName.trim(),
-        quantity: itemQty > 0 ? itemQty : 1,
-        description: itemDescription.trim() || undefined,
-        parentId,
-        entityTypeId,
-      });
+      let createdOrBoundId: string;
+
+      if (mode === 'slap-bind' && boundEntity) {
+        // Re-binding existing placeholder entity
+        const updated = await api.patchEntity(boundEntity.id, {
+          name: itemName.trim(),
+          quantity: itemQty > 0 ? itemQty : 1,
+          description: itemDescription.trim() || undefined,
+          parentId
+        });
+        createdOrBoundId = updated.id;
+      } else {
+        // Create new entity (with boundAssetId if in Slap & Bind mode)
+        const newEntity = await api.createEntity({
+          name: itemName.trim(),
+          quantity: itemQty > 0 ? itemQty : 1,
+          description: itemDescription.trim() || undefined,
+          parentId,
+          entityTypeId,
+          assetId: mode === 'slap-bind' && boundAssetId ? boundAssetId : undefined
+        });
+        createdOrBoundId = newEntity.id;
+      }
 
       // Upload photos sequentially
       for (let i = 0; i < photos.length; i++) {
         const p = photos[i];
         const blob = await compressImage(p.file);
-        await api.uploadAttachment(newEntity.id, blob, p.file.name || `photo_${i + 1}.jpg`, i === 0);
+        await api.uploadAttachment(createdOrBoundId, blob, p.file.name || `photo_${i + 1}.jpg`, i === 0);
       }
 
-      if (shouldPrint) {
-        await printLabel(newEntity.id);
-        notificationHub.show('success', 'RECEIVED & PRINTED', newEntity.name, 2500);
+      if (shouldPrint && mode !== 'slap-bind') {
+        await printLabel(createdOrBoundId);
+        notificationHub.show('success', 'RECEIVED & PRINTED', itemName, 2500);
+      } else if (mode === 'slap-bind') {
+        notificationHub.show('success', 'TAG BOUND & STORED', `${itemName} → ${boundAssetId || 'BOUND'}`, 2500);
       } else {
-        notificationHub.show('success', `STORED IN ${destinationName}`, newEntity.name, 2500);
+        notificationHub.show('success', `STORED IN ${destinationName}`, itemName, 2500);
       }
 
       playSuccess();
@@ -323,7 +524,12 @@
       itemName = '';
       itemQty = 1;
       itemDescription = '';
-      targetLocation = null;
+      if (mode === 'slap-bind') {
+        boundAssetId = null;
+        boundEntity = null;
+      } else {
+        targetLocation = null;
+      }
       clearPhotos();
     } catch (e: any) {
       playError();
@@ -334,86 +540,316 @@
     }
   }
 
-  // Scanner handler for Tera 0013 / BLE
-  export async function handleScan(raw: string) {
-    if (isProcessing) return;
+  // Hopper (Batch Inbound) Execution
+  function addToHopper(item: HopperItem) {
+    hopper = [item, ...hopper];
+  }
 
+  function removeFromHopper(id: string) {
+    hopper = hopper.filter(h => h.id !== id);
+  }
+
+  function clearHopper() {
+    hopper = [];
+  }
+
+  async function executeProcessHopper(shouldPrint: boolean) {
+    if (hopper.length === 0 || isProcessingHopper) return;
+
+    isProcessingHopper = true;
+    hopperProgress = { current: 0, total: hopper.length };
     playBeep();
-    isProcessing = true;
     const api = getApi();
 
     try {
-      const result = await resolveScan(raw, api);
-
-      if (mode === 'create') {
-        if (result.type === 'location' && result.entity) {
-          if (showLocationModal) {
-            handleLocationSelected(result.entity);
-            return;
-          } else {
-            targetLocation = result.entity;
-            playSuccess();
-            notificationHub.show('info', 'DESTINATION SET', result.entity.name);
-            return;
-          }
-        } else if (showLocationModal && result.type === 'item') {
-          throw new Error(`Expected location barcode, scanned item "${result.entity?.name}"`);
-        }
+      if (!config.receivingLocationId) {
+        await ensureSentinelLocations(api, 'ingest-hopper');
       }
 
-      if (mode === 'scan') {
-        if (result.type !== 'item' || !result.entity) {
-          throw new Error('Please scan a valid item to ingest');
+      const entityTypeId = await api.getDefaultItemTypeId();
+      const parentId = targetLocation ? targetLocation.id : config.receivingLocationId;
+
+      for (let i = 0; i < hopper.length; i++) {
+        const item = hopper[i];
+        if (item.status === 'done') continue;
+
+        item.status = 'processing';
+        hopperProgress = { current: i + 1, total: hopper.length };
+
+        const fullDescription = [
+          item.brand ? `Brand: ${item.brand}` : '',
+          item.description || '',
+          item.barcode ? `UPC: ${item.barcode}` : ''
+        ].filter(Boolean).join('\n');
+
+        const newEntity = await api.createEntity({
+          name: item.name,
+          quantity: item.quantity > 0 ? item.quantity : 1,
+          description: fullDescription || undefined,
+          parentId,
+          entityTypeId
+        });
+
+        item.createdEntityId = newEntity.id;
+
+        // Remote image attach if present
+        if (item.imageUrl) {
+          try {
+            const blob = await fetchProductImageBlob(item.imageUrl);
+            if (blob) {
+              const comp = await compressImage(blob);
+              await api.uploadAttachment(newEntity.id, comp, `${item.barcode || 'product'}.jpg`, true);
+            }
+          } catch (e) {
+            console.warn('Hopper image upload failed:', e);
+          }
         }
 
-        const targetLoc = config.receivingLocationId || config.stagingLocationId;
-        if (targetLoc) {
-          await api.patchEntity(result.entity.id, { parentId: targetLoc });
+        if (shouldPrint) {
+          try {
+            await printLabel(newEntity.id);
+          } catch (e) {
+            console.warn('Batch label print failed for item:', item.name, e);
+          }
         }
 
-        await printLabel(result.entity.id);
-        notificationHub.show('success', 'RE-INGESTED & PRINTED', result.entity.name, 2500);
+        item.status = 'done';
+      }
+
+      playSuccess();
+      notificationHub.show('success', 'BATCH COMPLETED', `Processed ${hopper.length} items to ${targetLocation?.name || '_RECEIVING'}`, 3500);
+    } catch (e: any) {
+      playError();
+      notificationHub.show('error', 'BATCH INGEST FAILED', e.message || 'Error processing batch', 4000);
+    } finally {
+      isProcessingHopper = false;
+    }
+  }
+
+  // Unified Scanner Handler (Tera 0013 / Camera / BLE)
+  export async function handleScan(raw: string) {
+    if (isProcessing || isProcessingHopper) return;
+    const clean = raw.trim();
+    if (!clean) return;
+
+    playBeep();
+
+    // 1. Location selection modal active
+    if (showLocationModal) {
+      const api = getApi();
+      const res = await resolveScan(clean, api);
+      if (res.type === 'location' && res.entity) {
+        handleLocationSelected(res.entity);
+        return;
+      }
+    }
+
+    // 2. Commercial Barcode (UPC / EAN) auto-resolution
+    if (isCommercialBarcode(clean)) {
+      await resolveCommercialBarcode(clean);
+      return;
+    }
+
+    // 3. Slap & Bind Mode: Scan Pre-Printed Tag
+    if (mode === 'slap-bind') {
+      const api = getApi();
+      const aMatch = clean.match(/\/a\/([^\s\/?#]+)/i);
+      const uuidMatch = clean.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+      const assetDirect = clean.match(/^([a-z0-9]{2,}-[a-z0-9]{2,})$/i);
+
+      let detectedAssetId = aMatch ? aMatch[1] : (assetDirect ? assetDirect[1] : null);
+      let detectedUuid = uuidMatch ? uuidMatch[1] : null;
+
+      if (detectedAssetId || detectedUuid) {
+        try {
+          let ent: Entity | null = null;
+          if (detectedAssetId) {
+            ent = await api.lookupByAssetId(detectedAssetId).catch(() => null);
+          } else if (detectedUuid) {
+            ent = await api.getEntity(detectedUuid).catch(() => null);
+          }
+
+          if (ent) {
+            boundEntity = ent;
+            boundAssetId = ent.assetId || detectedAssetId || ent.id.substring(0, 8);
+            if (ent.name && !ent.name.startsWith('Asset-') && !ent.name.startsWith('000-')) {
+              itemName = ent.name;
+            }
+          } else {
+            boundEntity = null;
+            boundAssetId = detectedAssetId || detectedUuid?.substring(0, 8) || clean;
+          }
+
+          playSuccess();
+          notificationHub.show('success', 'TAG BOUND', `Assigned tag ${boundAssetId}. Enter item name.`, 3000);
+          return;
+        } catch (e: any) {
+          boundAssetId = detectedAssetId || clean;
+          playSuccess();
+          notificationHub.show('info', 'TAG RECORDED', `Asset ${boundAssetId}`, 2500);
+          return;
+        }
+      }
+    }
+
+    // 4. Batch Hopper Mode: Standard Scan
+    if (mode === 'hopper') {
+      const api = getApi();
+      const res = await resolveScan(clean, api);
+      if (res.type === 'location' && res.entity) {
+        targetLocation = res.entity;
         playSuccess();
+        notificationHub.show('info', 'HOPPER DESTINATION SET', res.entity.name);
+        return;
+      }
+      // If it resolved to an item, add to hopper with its existing name
+      if (res.type === 'item' && res.entity) {
+        addToHopper({
+          id: Math.random().toString(36).substring(2, 9),
+          name: res.entity.name,
+          quantity: 1,
+          status: 'pending'
+        });
+        playSuccess();
+        notificationHub.show('success', 'ADDED TO HOPPER', res.entity.name, 2500);
+        return;
+      }
+      // Otherwise query as commercial barcode or add with raw barcode
+      await resolveCommercialBarcode(clean);
+      return;
+    }
+
+    // 5. Existing Item Re-ingest
+    if (mode === 'scan') {
+      const api = getApi();
+      const result = await resolveScan(clean, api);
+      if (result.type !== 'item' || !result.entity) {
+        playError();
+        notificationHub.show('error', 'SCAN FAILED', 'Please scan a valid item to re-receive', 3000);
         return;
       }
 
-      if (result.type === 'item') {
-        throw new Error(`Scanned item "${result.entity?.name}". Switch to "Scan Existing" to re-ingest.`);
+      const targetLoc = config.receivingLocationId || config.stagingLocationId;
+      if (targetLoc) {
+        await api.patchEntity(result.entity.id, { parentId: targetLoc });
       }
 
-      throw new Error('Unrecognized barcode');
-    } catch (e: any) {
-      playError();
-      notificationHub.show('error', 'SCAN FAILED', e.message || 'Scan failed', 3500);
-    } finally {
-      isProcessing = false;
+      await printLabel(result.entity.id);
+      notificationHub.show('success', 'RE-INGESTED & PRINTED', result.entity.name, 2500);
+      playSuccess();
+      return;
     }
+
+    // 6. Create Mode (Standard)
+    const api = getApi();
+    const result = await resolveScan(clean, api);
+
+    if (result.type === 'location' && result.entity) {
+      targetLocation = result.entity;
+      playSuccess();
+      notificationHub.show('info', 'DESTINATION SET', result.entity.name);
+      return;
+    }
+
+    if (result.type === 'item' && result.entity) {
+      playError();
+      notificationHub.show('warning', 'ITEM ALREADY EXISTS', `"${result.entity.name}". Switch to "Scan Existing" to re-receive.`);
+      return;
+    }
+
+    // If unresolved, attempt commercial lookup or record in description
+    await resolveCommercialBarcode(clean);
   }
 </script>
 
 <div class="flex-1 flex flex-col relative overflow-hidden bg-[#090a0f]">
   <!-- Header Sub-Tabs -->
-  <div class="flex border-b border-white/[0.08] bg-[#0c0e16] p-2 gap-2 shrink-0 select-none">
+  <div class="grid grid-cols-4 border-b border-white/[0.08] bg-[#0c0e16] p-1.5 gap-1.5 shrink-0 select-none">
     <button
       type="button"
       onclick={() => (mode = 'create')}
-      class="btn-tactile flex-1 py-2 px-3 text-xs sm:text-sm font-mono font-semibold rounded-lg flex items-center justify-center gap-2 border transition-all cursor-pointer {mode === 'create' ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
+      class="btn-tactile py-2 px-1 text-[11px] sm:text-xs font-mono font-semibold rounded-lg flex items-center justify-center gap-1.5 border transition-all cursor-pointer {mode === 'create' ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
     >
-      <PackagePlus class="w-4 h-4" />
-      <span>INTAKE NEW ITEM</span>
+      <PackagePlus class="w-3.5 h-3.5 shrink-0" />
+      <span class="truncate">SINGLE</span>
     </button>
+
+    <button
+      type="button"
+      onclick={() => (mode = 'slap-bind')}
+      class="btn-tactile py-2 px-1 text-[11px] sm:text-xs font-mono font-semibold rounded-lg flex items-center justify-center gap-1.5 border transition-all cursor-pointer {mode === 'slap-bind' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
+      title="Slap pre-printed label, scan tag, quick-bind without waiting on printer"
+    >
+      <Tag class="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+      <span class="truncate">SLAP & BIND</span>
+    </button>
+
+    <button
+      type="button"
+      onclick={() => (mode = 'hopper')}
+      class="btn-tactile py-2 px-1 text-[11px] sm:text-xs font-mono font-semibold rounded-lg flex items-center justify-center gap-1.5 border transition-all cursor-pointer {mode === 'hopper' ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
+      title="Rapid intake hopper for unboxing deliveries"
+    >
+      <Layers class="w-3.5 h-3.5 shrink-0 text-indigo-400" />
+      <span class="truncate">HOPPER ({hopper.length})</span>
+    </button>
+
     <button
       type="button"
       onclick={() => (mode = 'scan')}
-      class="btn-tactile flex-1 py-2 px-3 text-xs sm:text-sm font-mono font-semibold rounded-lg flex items-center justify-center gap-2 border transition-all cursor-pointer {mode === 'scan' ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
+      class="btn-tactile py-2 px-1 text-[11px] sm:text-xs font-mono font-semibold rounded-lg flex items-center justify-center gap-1.5 border transition-all cursor-pointer {mode === 'scan' ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
     >
-      <ScanLine class="w-4 h-4" />
-      <span>SCAN EXISTING</span>
+      <ScanLine class="w-3.5 h-3.5 shrink-0" />
+      <span class="truncate">RE-INGEST</span>
     </button>
   </div>
 
-  {#if mode === 'create'}
+  <!-- SINGLE INTAKE OR SLAP & BIND VIEW -->
+  {#if mode === 'create' || mode === 'slap-bind'}
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      
+      <!-- Slap & Bind Status Indicator -->
+      {#if mode === 'slap-bind'}
+        <div class="terminal-card px-3.5 py-2.5 rounded-xl border {boundAssetId ? 'border-emerald-500/40 bg-emerald-950/20' : 'border-dashed border-emerald-500/30 bg-emerald-950/10'} flex items-center justify-between text-xs font-mono">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <Tag class="w-4 h-4 {boundAssetId ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}" />
+            {#if boundAssetId}
+              <div>
+                <span class="text-slate-400 text-[10px] uppercase block">PRE-PRINTED TAG BOUND:</span>
+                <span class="text-emerald-300 font-bold text-sm tracking-wide">{boundAssetId}</span>
+              </div>
+            {:else}
+              <div>
+                <span class="text-slate-300 font-semibold block">STEP 1: SCAN PRE-PRINTED LABEL</span>
+                <span class="text-slate-500 text-[11px]">Slap label on item, then scan QR code</span>
+              </div>
+            {/if}
+          </div>
+
+          <div class="flex items-center gap-1.5 shrink-0">
+            {#if boundAssetId}
+              <button
+                type="button"
+                onclick={() => { boundAssetId = null; boundEntity = null; }}
+                class="btn-tactile text-rose-400 hover:text-rose-300 p-1 text-xs cursor-pointer"
+                title="Clear bound tag"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            {:else}
+              <button
+                type="button"
+                onclick={onTriggerCamera}
+                class="btn-tactile px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <Camera class="w-3.5 h-3.5" />
+                <span>SCAN TAG</span>
+              </button>
+            {/if}
+          </div>
+        </div>
+      {/if}
+
       <!-- Target Destination Location Context Banner -->
       <div class="flex items-center justify-between terminal-card px-3.5 py-2.5 rounded-xl border border-white/[0.08] text-xs font-mono">
         <div class="flex items-center gap-2 min-w-0">
@@ -450,19 +886,48 @@
         </button>
       </div>
 
-      <!-- Item Name Input -->
+      <!-- Item Name Input with Voice Dictation & Barcode Lookup -->
       <div>
-        <label for="item-name" class="block text-xs font-mono font-semibold text-slate-300 mb-1.5 uppercase">
-          Item Name <span class="text-rose-400">*</span>
-        </label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label for="item-name" class="block text-xs font-mono font-semibold text-slate-300 uppercase">
+            Item Name <span class="text-rose-400">*</span>
+          </label>
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              onclick={() => (showManualBarcodeModal = true)}
+              class="btn-tactile px-2 py-0.5 rounded text-[10px] font-mono border border-white/[0.1] bg-white/[0.04] text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+              title="Enter or search commercial UPC/EAN barcode"
+            >
+              <Barcode class="w-3 h-3 text-amber-400" />
+              <span>UPC LOOKUP</span>
+            </button>
+
+            <button
+              type="button"
+              onclick={toggleVoiceDictation}
+              class="btn-tactile px-2 py-0.5 rounded text-[10px] font-mono border flex items-center gap-1 cursor-pointer {isListeningVoice ? 'bg-rose-500/20 border-rose-500 text-rose-300 animate-pulse' : 'border-white/[0.1] bg-white/[0.04] text-slate-300 hover:text-white'}"
+              title="Voice dictation hands-free intake"
+            >
+              {#if isListeningVoice}
+                <MicOff class="w-3 h-3 text-rose-400" />
+                <span>LISTENING...</span>
+              {:else}
+                <Mic class="w-3 h-3 text-amber-400" />
+                <span>VOICE</span>
+              {/if}
+            </button>
+          </div>
+        </div>
+
         <div class="relative">
           <input
             id="item-name"
             type="text"
             bind:value={itemName}
-            placeholder="e.g. M3 Hex Screws 20mm"
+            placeholder={isListeningVoice ? voiceInterimText || 'Listening for item name and qty...' : 'e.g. M3 Hex Screws 20mm or scan UPC'}
             disabled={isProcessing}
-            class="terminal-input w-full rounded-xl px-4 py-3 text-base font-sans text-white placeholder-slate-600"
+            class="terminal-input w-full rounded-xl pl-4 pr-10 py-3 text-base font-sans text-white placeholder-slate-600 {isListeningVoice ? 'border-rose-500 ring-2 ring-rose-500/20' : ''}"
           />
           {#if itemName}
             <button
@@ -474,6 +939,11 @@
             </button>
           {/if}
         </div>
+        {#if isListeningVoice && voiceInterimText}
+          <div class="mt-1 text-xs font-mono text-rose-400 italic">
+            "{voiceInterimText}"
+          </div>
+        {/if}
       </div>
 
       <!-- Quantity Stepper -->
@@ -507,6 +977,21 @@
             <Plus class="w-5 h-5" />
           </button>
         </div>
+      </div>
+
+      <!-- Description / Barcode Details -->
+      <div>
+        <label for="item-desc" class="block text-xs font-mono font-semibold text-slate-300 mb-1.5 uppercase">
+          Details / Specifications
+        </label>
+        <textarea
+          id="item-desc"
+          rows="2"
+          bind:value={itemDescription}
+          placeholder="Brand, category, notes, or scanned UPC"
+          disabled={isProcessing}
+          class="terminal-input w-full rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 resize-none"
+        ></textarea>
       </div>
 
       <!-- Photos (Up to 5) -->
@@ -589,47 +1074,309 @@
 
       <!-- Action Buttons -->
       <div class="pt-2 flex items-stretch gap-2.5">
-        <button
-          type="button"
-          onclick={() => executeCreate(true)}
-          disabled={!itemName.trim() || isProcessing}
-          class="btn-tactile flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-bold py-3.5 px-4 rounded-xl text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 cursor-pointer disabled:cursor-not-allowed font-mono uppercase"
-        >
-          {#if isProcessing && isPrinting}
-            <Loader2 class="w-5 h-5 animate-spin" />
-            <span>PRINTING LABEL...</span>
-          {:else}
-            <Printer class="w-5 h-5" />
-            <span>CREATE & PRINT</span>
-          {/if}
-        </button>
+        {#if mode === 'slap-bind'}
+          <button
+            type="button"
+            onclick={() => executeCreate(false)}
+            disabled={!itemName.trim() || isProcessing}
+            class="btn-tactile flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black font-bold py-3.5 px-4 rounded-xl text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 cursor-pointer disabled:cursor-not-allowed font-mono uppercase"
+          >
+            {#if isProcessing}
+              <Loader2 class="w-5 h-5 animate-spin" />
+              <span>BINDING ASSET...</span>
+            {:else}
+              <CheckCircle2 class="w-5 h-5" />
+              <span>BIND & STORE (NO PRINT)</span>
+            {/if}
+          </button>
+        {:else}
+          <button
+            type="button"
+            onclick={() => executeCreate(true)}
+            disabled={!itemName.trim() || isProcessing}
+            class="btn-tactile flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-bold py-3.5 px-4 rounded-xl text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 cursor-pointer disabled:cursor-not-allowed font-mono uppercase"
+          >
+            {#if isProcessing && isPrinting}
+              <Loader2 class="w-5 h-5 animate-spin" />
+              <span>PRINTING LABEL...</span>
+            {:else}
+              <Printer class="w-5 h-5" />
+              <span>CREATE & PRINT</span>
+            {/if}
+          </button>
 
-        <button
-          type="button"
-          onclick={handleSaveOnlyClick}
-          disabled={!itemName.trim() || isProcessing}
-          title="Create item without printing label"
-          class="btn-tactile shrink-0 bg-white/[0.05] hover:bg-white/[0.1] disabled:opacity-40 text-slate-200 border border-white/[0.1] font-mono font-semibold py-3 px-3.5 rounded-xl text-xs flex flex-col items-center justify-center gap-1 cursor-pointer disabled:cursor-not-allowed"
-        >
-          {#if isProcessing && !isPrinting}
-            <Loader2 class="w-4 h-4 animate-spin text-amber-400" />
-            <span class="text-[10px]">SAVING...</span>
-          {:else}
-            <Save class="w-4 h-4 text-slate-400" />
-            <span class="text-[10px] uppercase">SAVE ONLY</span>
-          {/if}
-        </button>
+          <button
+            type="button"
+            onclick={handleSaveOnlyClick}
+            disabled={!itemName.trim() || isProcessing}
+            title="Create item without printing label"
+            class="btn-tactile shrink-0 bg-white/[0.05] hover:bg-white/[0.1] disabled:opacity-40 text-slate-200 border border-white/[0.1] font-mono font-semibold py-3 px-3.5 rounded-xl text-xs flex flex-col items-center justify-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+          >
+            {#if isProcessing && !isPrinting}
+              <Loader2 class="w-4 h-4 animate-spin text-amber-400" />
+              <span class="text-[10px]">SAVING...</span>
+            {:else}
+              <Save class="w-4 h-4 text-slate-400" />
+              <span class="text-[10px] uppercase">SAVE ONLY</span>
+            {/if}
+          </button>
+        {/if}
       </div>
     </div>
+
+  <!-- BATCH INBOUND HOPPER VIEW -->
+  {:else if mode === 'hopper'}
+    <div class="flex-1 flex flex-col overflow-hidden p-3 sm:p-4 gap-3">
+      
+      <!-- Target Location Banner -->
+      <div class="flex items-center justify-between terminal-card px-3.5 py-2.5 rounded-xl border border-white/[0.08] text-xs font-mono shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <MapPin class="w-4 h-4 text-indigo-400 shrink-0" />
+          <span class="truncate text-slate-300">
+            BATCH DESTINATION: <strong class="text-white">{targetLocation?.name || config.receivingLocationName || '_RECEIVING'}</strong>
+          </span>
+        </div>
+        <button
+          type="button"
+          onclick={() => openLocationPicker('select-target')}
+          disabled={isProcessingHopper}
+          class="btn-tactile text-indigo-400 hover:text-indigo-300 font-semibold text-xs tracking-tight shrink-0 cursor-pointer"
+        >
+          CHANGE
+        </button>
+      </div>
+
+      <!-- Quick Scan Prompt / Trigger -->
+      <div class="terminal-card p-3 rounded-xl border border-white/[0.08] flex items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-2 min-w-0 text-xs font-mono">
+          <Barcode class="w-4 h-4 text-indigo-400 shrink-0" />
+          <span class="text-slate-300 truncate">Scan delivery box barcodes to load hopper</span>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onclick={() => (showManualBarcodeModal = true)}
+            class="btn-tactile px-2.5 py-1 rounded-lg bg-white/[0.05] border border-white/[0.1] text-xs font-mono text-slate-300 hover:text-white cursor-pointer"
+          >
+            ENTER UPC
+          </button>
+          <button
+            type="button"
+            onclick={toggleVoiceDictation}
+            class="btn-tactile px-2.5 py-1 rounded-lg border text-xs font-mono flex items-center gap-1 cursor-pointer {isListeningVoice ? 'bg-rose-500/20 border-rose-500 text-rose-300 animate-pulse' : 'bg-white/[0.05] border-white/[0.1] text-slate-300 hover:text-white'}"
+          >
+            <Mic class="w-3.5 h-3.5 text-indigo-400" />
+            <span>{isListeningVoice ? 'LISTENING' : 'VOICE'}</span>
+          </button>
+          <button
+            type="button"
+            onclick={onTriggerCamera}
+            class="btn-tactile px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-xs font-mono font-semibold flex items-center gap-1 cursor-pointer"
+          >
+            <Camera class="w-3.5 h-3.5" />
+            <span>CAMERA</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Hopper Queue List -->
+      <div class="flex-1 overflow-y-auto space-y-2 pr-1">
+        {#if hopper.length === 0}
+          <div class="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500 font-mono">
+            <Layers class="w-10 h-10 mb-3 text-slate-600" />
+            <p class="text-sm font-bold text-slate-400">HOPPER IS EMPTY</p>
+            <p class="text-xs text-slate-500 mt-1 max-w-xs">
+              Point your scanner at packages or use the UPC/Voice buttons to queue items for batch receiving.
+            </p>
+          </div>
+        {:else}
+          {#each hopper as item, i (item.id)}
+            <div class="terminal-card p-2.5 rounded-xl border border-white/[0.08] flex items-center justify-between gap-3 text-xs font-mono {item.status === 'done' ? 'opacity-60 bg-emerald-950/10 border-emerald-500/30' : ''}">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="text-slate-500 text-[10px] w-4 shrink-0">#{hopper.length - i}</span>
+                {#if item.imageUrl}
+                  <img src={item.imageUrl} alt="" class="w-9 h-9 rounded-lg object-cover bg-slate-900 border border-white/[0.1] shrink-0" />
+                {:else}
+                  <div class="w-9 h-9 rounded-lg bg-white/[0.05] border border-white/[0.1] flex items-center justify-center shrink-0">
+                    <PackagePlus class="w-4 h-4 text-indigo-400" />
+                  </div>
+                {/if}
+                <div class="min-w-0">
+                  <div class="font-bold text-white truncate text-xs sm:text-sm">{item.name}</div>
+                  <div class="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                    {#if item.barcode}
+                      <span class="bg-white/[0.05] px-1.5 py-0.5 rounded border border-white/[0.08] text-slate-300">
+                        {item.barcode}
+                      </span>
+                    {/if}
+                    {#if item.brand}
+                      <span class="text-slate-500">{item.brand}</span>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 shrink-0">
+                {#if item.status === 'done'}
+                  <span class="text-emerald-400 font-bold flex items-center gap-1 text-[11px]">
+                    <Check class="w-3.5 h-3.5" /> DONE
+                  </span>
+                {:else if item.status === 'processing'}
+                  <span class="text-amber-400 font-bold flex items-center gap-1 text-[11px]">
+                    <Loader2 class="w-3.5 h-3.5 animate-spin" /> SAVING
+                  </span>
+                {:else}
+                  <!-- Inline quantity buttons -->
+                  <div class="flex items-center gap-1 bg-white/[0.04] p-1 rounded-lg border border-white/[0.08]">
+                    <button
+                      type="button"
+                      onclick={() => (item.quantity = Math.max(1, item.quantity - 1))}
+                      disabled={isProcessingHopper || item.quantity <= 1}
+                      class="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <Minus class="w-3 h-3" />
+                    </button>
+                    <span class="w-6 text-center font-bold text-white">{item.quantity}</span>
+                    <button
+                      type="button"
+                      onclick={() => (item.quantity = item.quantity + 1)}
+                      disabled={isProcessingHopper}
+                      class="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <Plus class="w-3 h-3" />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onclick={() => removeFromHopper(item.id)}
+                    disabled={isProcessingHopper}
+                    class="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-white/[0.05] cursor-pointer"
+                    title="Remove from hopper"
+                  >
+                    <Trash2 class="w-4 h-4" />
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
+      <!-- Hopper Action Footer -->
+      {#if hopper.length > 0}
+        <div class="pt-2 border-t border-white/[0.08] flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onclick={() => executeProcessHopper(true)}
+            disabled={isProcessingHopper}
+            class="btn-tactile flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/40 cursor-pointer font-mono uppercase"
+          >
+            {#if isProcessingHopper}
+              <Loader2 class="w-4 h-4 animate-spin" />
+              <span>SAVING ({hopperProgress.current}/{hopperProgress.total})...</span>
+            {:else}
+              <Printer class="w-4 h-4" />
+              <span>RECEIVE & PRINT ALL ({hopper.length})</span>
+            {/if}
+          </button>
+
+          <button
+            type="button"
+            onclick={() => executeProcessHopper(false)}
+            disabled={isProcessingHopper}
+            title="Receive into bin without printing labels"
+            class="btn-tactile py-3 px-3 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 border border-white/[0.1] text-xs font-mono font-semibold cursor-pointer"
+          >
+            STORE ALL
+          </button>
+
+          <button
+            type="button"
+            onclick={clearHopper}
+            disabled={isProcessingHopper}
+            title="Clear hopper"
+            class="btn-tactile py-3 px-2.5 rounded-xl bg-transparent hover:bg-white/[0.05] text-slate-500 hover:text-rose-400 text-xs font-mono cursor-pointer"
+          >
+            <Trash2 class="w-4 h-4" />
+          </button>
+        </div>
+      {/if}
+    </div>
+
+  <!-- RE-INGEST EXISTING VIEW -->
   {:else}
-    <!-- Scan Existing View -->
     <div class="flex-1 flex flex-col justify-center">
       <ScanPrompt 
-        label="Scan Item to Ingest" 
-        sublabel="Point scanner at existing item barcode to re-receive"
+        label="Scan Item to Re-Ingest" 
+        sublabel="Point scanner at existing item barcode to move to receiving"
         iconType="scan"
         onManualScan={onTriggerCamera}
       />
+    </div>
+  {/if}
+
+  <!-- Manual Barcode Lookup Modal -->
+  {#if showManualBarcodeModal}
+    <div class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-[#10131d] border border-white/[0.1] rounded-2xl w-full max-w-sm p-4 shadow-2xl space-y-4">
+        <div class="flex items-center justify-between border-b border-white/[0.08] pb-3">
+          <div class="flex items-center gap-2">
+            <Barcode class="w-4 h-4 text-amber-400" />
+            <h3 class="font-mono font-bold text-white text-sm uppercase">Global Barcode Lookup</h3>
+          </div>
+          <button
+            type="button"
+            onclick={() => (showManualBarcodeModal = false)}
+            class="text-slate-400 hover:text-white p-1"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </div>
+
+        <p class="text-xs font-mono text-slate-400">
+          Enter standard UPC-A, EAN-13, or GTIN to auto-fetch product name, details, and packaging image.
+        </p>
+
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            resolveCommercialBarcode(manualBarcodeInput);
+          }}
+        >
+          <div class="relative">
+            <input
+              type="text"
+              bind:value={manualBarcodeInput}
+              placeholder="e.g. 025293000987"
+              class="terminal-input w-full rounded-xl px-3 py-2.5 text-sm font-mono text-white placeholder-slate-600 mb-3"
+            />
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={!manualBarcodeInput.trim() || isLookingUpBarcode}
+              class="btn-tactile flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-bold py-2.5 px-3 rounded-xl text-xs font-mono uppercase flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              {#if isLookingUpBarcode}
+                <Loader2 class="w-4 h-4 animate-spin" />
+                <span>RESOLVING...</span>
+              {:else}
+                <Search class="w-4 h-4" />
+                <span>RESOLVE BARCODE</span>
+              {/if}
+            </button>
+            <button
+              type="button"
+              onclick={() => (showManualBarcodeModal = false)}
+              class="btn-tactile py-2.5 px-3 rounded-xl bg-white/[0.05] text-slate-400 hover:text-white text-xs font-mono cursor-pointer"
+            >
+              CANCEL
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   {/if}
 
@@ -653,13 +1400,32 @@
               Scan any bin barcode to select instantly
             </p>
           </div>
-          <button
-            type="button"
-            onclick={closeLocationPicker}
-            class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] cursor-pointer"
-          >
-            <X class="w-5 h-5" />
-          </button>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onclick={async () => {
+                isLoadingLocations = true;
+                try {
+                  const api = getApi();
+                  availableLocations = await api.listLocations();
+                } finally {
+                  isLoadingLocations = false;
+                }
+              }}
+              disabled={isLoadingLocations}
+              class="text-amber-400 hover:text-amber-300 p-1.5 rounded-lg hover:bg-white/[0.08] cursor-pointer transition-colors"
+              title="Refresh warehouse locations"
+            >
+              <RefreshCw class="w-4 h-4 {isLoadingLocations ? 'animate-spin' : ''}" />
+            </button>
+            <button
+              type="button"
+              onclick={closeLocationPicker}
+              class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] cursor-pointer"
+            >
+              <X class="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <!-- Search Bar -->

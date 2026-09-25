@@ -233,6 +233,77 @@ def log_cycle_count(req: CycleCountLogRequest):
 def list_cycle_counts():
     return database.get_recent_cycle_counts()
 
+# ── Companion: Global Barcode Lookup (UPC/EAN) ──
+
+@app.get("/companion/barcode-lookup/{barcode}")
+async def lookup_barcode(barcode: str):
+    clean_code = barcode.strip()
+    
+    # 1. Query Open Food Facts (Groceries, toiletries, household consumables)
+    try:
+        off_url = f"https://world.openfoodfacts.org/api/v2/product/{clean_code}.json"
+        async with httpx.AsyncClient(timeout=4.0) as http_client:
+            res = await http_client.get(off_url)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("status") == 1 and "product" in data:
+                    p = data["product"]
+                    name = p.get("product_name") or p.get("product_name_en")
+                    if name:
+                        return {
+                            "found": True,
+                            "barcode": clean_code,
+                            "name": name.strip(),
+                            "brand": (p.get("brands") or "").strip(),
+                            "description": (p.get("generic_name") or p.get("categories") or "").strip(),
+                            "imageUrl": p.get("image_front_url") or p.get("image_url"),
+                            "source": "OpenFoodFacts"
+                        }
+    except Exception:
+        pass
+
+    # 2. Query UPCitemdb (Tools, hardware, electronics, general retail)
+    try:
+        upc_url = f"https://api.upcitemdb.com/prod/trial/lookup?upc={clean_code}"
+        async with httpx.AsyncClient(timeout=4.0) as http_client:
+            res = await http_client.get(upc_url)
+            if res.status_code == 200:
+                data = res.json()
+                items = data.get("items", [])
+                if items:
+                    item = items[0]
+                    name = item.get("title")
+                    if name:
+                        images = item.get("images", [])
+                        return {
+                            "found": True,
+                            "barcode": clean_code,
+                            "name": name.strip(),
+                            "brand": (item.get("brand") or "").strip(),
+                            "description": (item.get("description") or "").strip(),
+                            "imageUrl": images[0] if images else None,
+                            "source": "UPCitemdb"
+                        }
+    except Exception:
+        pass
+
+    return {"found": False, "barcode": clean_code}
+
+@app.get("/companion/proxy-image")
+async def proxy_image(url: str):
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(400, "Invalid image URL")
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as http_client:
+            res = await http_client.get(url)
+            if res.status_code != 200:
+                raise HTTPException(res.status_code, "Failed to download remote image")
+            content_type = res.headers.get("content-type", "image/jpeg")
+            from fastapi.responses import Response
+            return Response(content=res.content, media_type=content_type)
+    except Exception as e:
+        raise HTTPException(500, f"Proxy failed: {str(e)}")
+
 @app.get("/health")
 async def health():
     return {

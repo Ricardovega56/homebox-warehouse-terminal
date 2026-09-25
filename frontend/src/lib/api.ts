@@ -104,7 +104,7 @@ export class HomeboxApi {
     });
   }
 
-  async createEntity(data: { name: string; entityTypeId: string; parentId?: string; quantity?: number; description?: string }): Promise<Entity> {
+  async createEntity(data: { name: string; entityTypeId: string; parentId?: string; quantity?: number; description?: string; assetId?: string }): Promise<Entity> {
     return this.fetchApi(`/api/v1/entities`, {
       method: 'POST',
       body: JSON.stringify(data)
@@ -154,8 +154,42 @@ export class HomeboxApi {
   }
 
   async listLocations(): Promise<Entity[]> {
-    const res = await this.fetchApi<any>(`/api/v1/entities?isLocation=true&pageSize=1000`);
-    return Array.isArray(res) ? res : (res?.items ?? []);
+    try {
+      const res = await this.fetchApi<any>(`/api/v1/entities?isLocation=true&pageSize=1000`);
+      const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
+      if (items.length > 0) return items;
+    } catch (e) {
+      console.warn('GET /api/v1/entities?isLocation=true failed, falling back to /api/v1/entities/tree', e);
+    }
+
+    // Fallback: Query hierarchical location tree from Homebox v0.26+
+    try {
+      const tree = await this.fetchApi<any[]>(`/api/v1/entities/tree`);
+      if (Array.isArray(tree) && tree.length > 0) {
+        return this.flattenLocationTree(tree);
+      }
+    } catch (e) {
+      console.warn('GET /api/v1/entities/tree fallback failed', e);
+    }
+
+    return [];
+  }
+
+  flattenLocationTree(nodes: any[], parent?: { id: string; name: string }): Entity[] {
+    const list: Entity[] = [];
+    for (const node of nodes) {
+      const entity: Entity = {
+        id: node.id,
+        name: node.name,
+        parent: parent ? { id: parent.id, name: parent.name } : undefined,
+        entityType: { id: '', name: 'Location', isLocation: true }
+      };
+      list.push(entity);
+      if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+        list.push(...this.flattenLocationTree(node.children, { id: node.id, name: node.name }));
+      }
+    }
+    return list;
   }
 
   async createLocation(data: { name: string; parentId?: string; description?: string }): Promise<Entity> {

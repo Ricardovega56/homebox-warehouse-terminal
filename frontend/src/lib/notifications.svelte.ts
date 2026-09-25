@@ -1,12 +1,12 @@
 export interface TerminalNotification {
   id: string;
-  type: 'success' | 'error' | 'info';
+  type: 'success' | 'error' | 'info' | 'warning';
   title: string;
   subtitle?: string;
 }
 
 export interface BezelFlash {
-  color: 'green' | 'red';
+  color: 'green' | 'red' | 'amber';
   key: number;
 }
 
@@ -17,7 +17,7 @@ class NotificationManager {
   private bezelTimer: any = null;
   private counter = 0;
 
-  show(type: 'success' | 'error' | 'info', title: string, subtitle?: string, durationMs = 2200) {
+  show(type: 'success' | 'error' | 'info' | 'warning', title: string, subtitle?: string, durationMs = 2200) {
     if (this.timer) clearTimeout(this.timer);
     
     this.current = {
@@ -28,8 +28,8 @@ class NotificationManager {
     };
 
     // Trigger perimeter bezel flash
-    if (type === 'success' || type === 'error') {
-      this.triggerBezel(type === 'success' ? 'green' : 'red');
+    if (type === 'success' || type === 'error' || type === 'warning') {
+      this.triggerBezel(type === 'success' ? 'green' : type === 'error' ? 'red' : 'amber');
     }
 
     this.timer = setTimeout(() => {
@@ -37,7 +37,7 @@ class NotificationManager {
     }, durationMs);
   }
 
-  triggerBezel(color: 'green' | 'red') {
+  triggerBezel(color: 'green' | 'red' | 'amber') {
     if (this.bezelTimer) clearTimeout(this.bezelTimer);
     this.bezel = { color, key: ++this.counter };
     this.bezelTimer = setTimeout(() => {

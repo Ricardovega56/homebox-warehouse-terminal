@@ -276,7 +276,7 @@
   <div class="flex border-b border-white/[0.08] bg-[#0c0e16] p-2 gap-2 shrink-0 select-none">
     <button
       type="button"
-      onclick={() => (mode = 'create')}
+      onclick={() => { mode = 'create'; if (locations.length === 0) fetchLocations(); }}
       class="btn-tactile flex-1 py-2 px-3 text-xs sm:text-sm font-mono font-semibold rounded-lg flex items-center justify-center gap-2 border transition-all cursor-pointer {mode === 'create' ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-sm' : 'bg-transparent border-transparent text-slate-400 hover:text-white'}"
     >
       <Plus class="w-4 h-4" />
@@ -351,16 +351,28 @@
 
       <!-- Parent Location Selector -->
       <div>
-        <label for="loc-parent" class="block text-xs font-mono font-semibold text-slate-300 mb-1.5 uppercase">
-          Parent Location <span class="text-slate-500 font-normal lowercase">(optional hierarchy)</span>
-        </label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label for="loc-parent" class="text-xs font-mono font-semibold text-slate-300 uppercase">
+            Parent Location <span class="text-slate-500 font-normal lowercase">(optional hierarchy)</span>
+          </label>
+          <button
+            type="button"
+            onclick={() => fetchLocations()}
+            disabled={isLoadingLocations}
+            class="text-[11px] font-mono text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer transition-colors"
+            title="Refresh warehouse locations"
+          >
+            <RefreshCw class="w-3 h-3 {isLoadingLocations ? 'animate-spin' : ''}" />
+            <span>{isLoadingLocations ? 'Loading...' : `Refresh (${locations.length})`}</span>
+          </button>
+        </div>
         <select
           id="loc-parent"
           bind:value={parentId}
-          disabled={isProcessing}
+          disabled={isProcessing || isLoadingLocations}
           class="terminal-input w-full rounded-xl px-3.5 py-3 text-xs font-mono text-white"
         >
-          <option value="">-- None (Top Level) --</option>
+          <option value="">{isLoadingLocations ? '⏳ Loading warehouse locations...' : '-- None (Top Level) --'}</option>
           {#each locations as loc (loc.id)}
             <option value={loc.id}>
               {loc.name} {loc.parent ? `(${loc.parent.name})` : ''}

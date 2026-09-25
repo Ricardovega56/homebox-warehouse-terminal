@@ -107,6 +107,22 @@
       }
     }
   }
+
+  async function handleResetAppCache() {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        await registration.unregister();
+      }
+    }
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      const cacheNames = await caches.keys();
+      for (const name of cacheNames) {
+        await caches.delete(name);
+      }
+    }
+    window.location.reload();
+  }
 </script>
 
 <div class="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#090a0f] space-y-5 select-none font-mono">
@@ -206,6 +222,16 @@
             placeholder="Default: /relay (proxied automatically)"
             class="terminal-input w-full rounded-lg p-2.5 text-xs text-white"
           />
+        </div>
+        <div class="pt-2 border-t border-white/[0.08]">
+          <button
+            type="button"
+            onclick={handleResetAppCache}
+            class="btn-tactile w-full bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl py-2 px-3 text-[11px] font-mono flex items-center justify-center gap-2 cursor-pointer transition-colors"
+          >
+            <RotateCcw class="w-3.5 h-3.5" />
+            <span>FORCE UPDATE & PURGE PWA CACHE</span>
+          </button>
         </div>
       </div>
     </details>

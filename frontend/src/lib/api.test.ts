@@ -48,6 +48,75 @@ describe('HomeboxApi Client Contract Tests', () => {
     expect(result[0].id).toBe('loc-1');
   });
 
+  it('listLocations falls back to /api/v1/entities/tree when entities query returns empty', async () => {
+    // 1. Entities query returns empty
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: [], total: 0 })
+    });
+
+    // 2. Tree query returns nested locations
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          id: 'tree-1',
+          name: 'Kitchen',
+          children: [
+            { id: 'tree-2', name: 'SINK01', children: [] },
+            { id: 'tree-3', name: 'SINK02', children: [{ id: 'tree-4', name: 'BIN01', children: [] }] }
+          ]
+        },
+        {
+          id: 'tree-5',
+          name: 'Garage',
+          children: []
+        }
+      ]
+    });
+
+    const result = await api.listLocations();
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0]).toBe('http://test-homebox/api/v1/entities?isLocation=true&pageSize=1000');
+    expect(mockFetch.mock.calls[1][0]).toBe('http://test-homebox/api/v1/entities/tree');
+
+    expect(result).toHaveLength(5);
+    const sink01 = result.find(r => r.name === 'SINK01');
+    expect(sink01).toBeDefined();
+    expect(sink01?.parent?.name).toBe('Kitchen');
+    expect(sink01?.parent?.id).toBe('tree-1');
+
+    const bin01 = result.find(r => r.name === 'BIN01');
+    expect(bin01).toBeDefined();
+    expect(bin01?.parent?.name).toBe('SINK02');
+    expect(bin01?.parent?.id).toBe('tree-3');
+  });
+
+  it('listLocations falls back to /api/v1/entities/tree when entities query throws an error', async () => {
+    // 1. Entities query fails (network / server error)
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error'
+    });
+
+    // 2. Tree query succeeds
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [{ id: 'loc-attic', name: 'Attic', children: [] }]
+    });
+
+    const result = await api.listLocations();
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('Attic');
+  });
+
   it('getEntity falls back to /items/{id} if /entities/{id} fails', async () => {
     // First call to /entities/123 fails (404)
     mockFetch.mockResolvedValueOnce({

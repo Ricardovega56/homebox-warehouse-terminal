@@ -1,6 +1,6 @@
 <script lang="ts">
   import { notificationHub } from '../lib/notifications.svelte';
-  import { CheckCircle2, AlertCircle, Info, X } from 'lucide-svelte';
+  import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-svelte';
 </script>
 
 {#if notificationHub.current}
@@ -9,13 +9,15 @@
     role="status"
   >
     <div
-      class="pointer-events-auto max-w-md w-full rounded-xl p-3 shadow-2xl backdrop-blur-md border flex items-center justify-between gap-3 text-sm {notificationHub.current.type === 'success' ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-100 shadow-emerald-950/50' : notificationHub.current.type === 'error' ? 'bg-rose-950/90 border-rose-500/50 text-rose-100 shadow-rose-950/50' : 'bg-slate-900/90 border-slate-700 text-slate-100'}"
+      class="pointer-events-auto max-w-md w-full rounded-xl p-3 shadow-2xl backdrop-blur-md border flex items-center justify-between gap-3 text-sm {notificationHub.current.type === 'success' ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-100 shadow-emerald-950/50' : notificationHub.current.type === 'error' ? 'bg-rose-950/90 border-rose-500/50 text-rose-100 shadow-rose-950/50' : notificationHub.current.type === 'warning' ? 'bg-amber-950/90 border-amber-500/50 text-amber-100 shadow-amber-950/50' : 'bg-slate-900/90 border-slate-700 text-slate-100'}"
     >
       <div class="flex items-center gap-2.5 min-w-0">
         {#if notificationHub.current.type === 'success'}
           <CheckCircle2 class="w-5 h-5 text-emerald-400 shrink-0" />
         {:else if notificationHub.current.type === 'error'}
           <AlertCircle class="w-5 h-5 text-rose-400 shrink-0" />
+        {:else if notificationHub.current.type === 'warning'}
+          <AlertTriangle class="w-5 h-5 text-amber-400 shrink-0" />
         {:else}
           <Info class="w-5 h-5 text-sky-400 shrink-0" />
         {/if}
