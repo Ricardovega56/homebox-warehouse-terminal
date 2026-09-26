@@ -35,19 +35,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r relay/requirements.txt pytest
 
-      - name: [1/5] Frontend Type Checks (svelte-check)
+      - name: "[1/5] Frontend Type Checks (svelte-check)"
         run: npm --prefix frontend run check
 
-      - name: [2/5] Frontend Unit Tests (Vitest)
+      - name: "[2/5] Frontend Unit Tests (Vitest)"
         run: npm --prefix frontend test
 
-      - name: [3/5] Relay Unit Tests (pytest)
+      - name: "[3/5] Relay Unit Tests (pytest)"
         run: pytest relay/test_relay.py
 
-      - name: [4/5] Build Frontend Production Assets
+      - name: "[4/5] Build Frontend Production Assets"
         run: npm --prefix frontend run build
 
-      - name: [5/5] Test Docker Container Image Builds
+      - name: "[5/5] Test Docker Container Image Builds"
         run: |
           docker build -t hwt-frontend:ci ./frontend
           docker build -t hwt-relay:ci ./relay
