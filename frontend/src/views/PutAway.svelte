@@ -6,7 +6,7 @@
   import { playSuccess, playError, playBeep } from '../lib/audio';
   import { notificationHub } from '../lib/notifications.svelte';
   import type { Entity } from '../lib/api';
-  import { ArrowRightLeft, X, Check, Loader2 } from 'lucide-svelte';
+  import { ArrowRightLeft, Check, Loader2 } from 'lucide-svelte';
 
   type PutAwayPhase = 'scan-source' | 'scan-destination' | 'committing';
   let phase = $state<PutAwayPhase>('scan-source');
@@ -103,17 +103,7 @@
   {:else if currentSource}
     <div class="flex-1 flex flex-col justify-between">
       <!-- Active Source Entity Header -->
-      <div class="relative">
-        <ItemCard entity={currentSource} />
-        <button
-          type="button"
-          onclick={reset}
-          class="btn-tactile absolute top-6 right-6 bg-white/[0.08] hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-white/[0.1] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-        >
-          <X class="w-3.5 h-3.5" />
-          <span>CANCEL</span>
-        </button>
-      </div>
+      <ItemCard entity={currentSource} onCancel={reset} />
 
       <!-- Destination Prompt / Committing -->
       <div class="flex-1 flex flex-col items-center justify-center p-4">

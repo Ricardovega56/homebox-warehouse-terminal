@@ -1,13 +1,14 @@
 <script lang="ts">
   import type { Entity } from '../lib/api';
-  import { Package, MapPin, Printer, Hash } from 'lucide-svelte';
+  import { Package, MapPin, Printer, Hash, X } from 'lucide-svelte';
   import { printLabel } from '../lib/printer';
   import { notificationHub } from '../lib/notifications.svelte';
   import { playSuccess, playError } from '../lib/audio';
 
-  const { entity, onPrintLabel } = $props<{ 
+  const { entity, onPrintLabel, onCancel } = $props<{ 
     entity: Entity;
     onPrintLabel?: () => void;
+    onCancel?: () => void;
   }>();
 
   let isLocation = $derived.by(() => {
@@ -40,37 +41,51 @@
 <div class="terminal-card rounded-2xl p-4 sm:p-5 m-3 sm:m-4 relative overflow-hidden border border-white/[0.08]">
   <!-- Type Badge & Header Actions -->
   <div class="flex items-center justify-between gap-2 mb-2.5">
-    <div class="flex items-center gap-2">
+    <div class="flex items-center flex-wrap gap-2 min-w-0">
       {#if isLocation}
-        <span class="bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs px-2.5 py-0.5 rounded-md font-mono font-medium inline-flex items-center gap-1.5">
+        <span class="bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs px-2.5 py-0.5 rounded-md font-mono font-medium inline-flex items-center gap-1.5 shrink-0">
           <MapPin class="w-3.5 h-3.5 text-cyan-400" />
           <span>LOCATION / BIN</span>
         </span>
       {:else}
-        <span class="bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-0.5 rounded-md font-mono font-medium inline-flex items-center gap-1.5">
+        <span class="bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs px-2.5 py-0.5 rounded-md font-mono font-medium inline-flex items-center gap-1.5 shrink-0">
           <Package class="w-3.5 h-3.5 text-amber-400" />
           <span>ITEM</span>
         </span>
       {/if}
 
       {#if entity.assetId}
-        <span class="bg-white/[0.05] border border-white/[0.08] text-slate-300 text-xs px-2 py-0.5 rounded-md font-mono flex items-center gap-1">
+        <span class="bg-white/[0.05] border border-white/[0.08] text-slate-300 text-xs px-2 py-0.5 rounded-md font-mono flex items-center gap-1 shrink-0">
           <Hash class="w-3 h-3 text-slate-400" />
           <span>{entity.assetId}</span>
         </span>
       {/if}
     </div>
 
-    <!-- Quick Label Print Action -->
-    <button
-      type="button"
-      onclick={handlePrint}
-      disabled={isPrinting}
-      title="Print Brother QL label"
-      class="btn-tactile p-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
-    >
-      <Printer class="w-4 h-4 {isPrinting ? 'animate-spin text-amber-400' : ''}" />
-    </button>
+    <!-- Header Actions (Print & Cancel) -->
+    <div class="flex items-center gap-2 shrink-0">
+      <button
+        type="button"
+        onclick={handlePrint}
+        disabled={isPrinting}
+        title="Print Brother QL label"
+        class="btn-tactile p-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+      >
+        <Printer class="w-4 h-4 {isPrinting ? 'animate-spin text-amber-400' : ''}" />
+      </button>
+
+      {#if onCancel}
+        <button
+          type="button"
+          onclick={onCancel}
+          title="Cancel relocation"
+          class="btn-tactile bg-white/[0.08] hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-white/[0.1] px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+        >
+          <X class="w-3.5 h-3.5" />
+          <span>CANCEL</span>
+        </button>
+      {/if}
+    </div>
   </div>
 
   <!-- Name & Details -->
