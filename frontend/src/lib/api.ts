@@ -43,8 +43,24 @@ export class HomeboxApi {
 
   constructor(config: { baseUrl?: string; token: string }) {
     // Default to relative paths — nginx proxies /api/* to Homebox internally
-    this.baseUrl = config.baseUrl || '';
-    this.token = config.token;
+    this.baseUrl = (config.baseUrl || '').trim().replace(/\/+$/, '');
+    this.token = (config.token || '').trim().replace(/^["']|["']$/g, '');
+  }
+
+  hasToken(): boolean {
+    return Boolean(this.token && this.token.length > 0);
+  }
+
+  getToken(): string {
+    return this.token;
+  }
+
+  async testAuth(): Promise<boolean> {
+    if (!this.token) {
+      throw new Error('No API token provided');
+    }
+    await this.fetchApi('/api/v1/entities?pageSize=1');
+    return true;
   }
 
   private async fetchApi<T = any>(path: string, options: RequestInit = {}): Promise<T> {
@@ -155,11 +171,18 @@ export class HomeboxApi {
   }
 
   async listLocations(): Promise<Entity[]> {
+    if (!this.token) {
+      throw new Error('No Homebox API token configured. Go to Setup tab to enter your token.');
+    }
+
+    let lastError: any = null;
+
     try {
       const res = await this.fetchApi<any>(`/api/v1/entities?isLocation=true&pageSize=1000`);
       const items: Entity[] = Array.isArray(res) ? res : (res?.items ?? []);
       if (items.length > 0) return items;
-    } catch (e) {
+    } catch (e: any) {
+      lastError = e;
       console.warn('GET /api/v1/entities?isLocation=true failed, falling back to /api/v1/entities/tree', e);
     }
 
@@ -169,8 +192,14 @@ export class HomeboxApi {
       if (Array.isArray(tree) && tree.length > 0) {
         return this.flattenLocationTree(tree);
       }
-    } catch (e) {
+    } catch (e: any) {
+      lastError = e;
       console.warn('GET /api/v1/entities/tree fallback failed', e);
+    }
+
+    // If both failed due to authentication or network connectivity, raise the error so UI can display it
+    if (lastError && (lastError.message?.includes('401') || lastError.message?.includes('403') || lastError.message?.includes('Failed to fetch') || lastError.message?.includes('Network'))) {
+      throw lastError;
     }
 
     return [];

@@ -13,7 +13,8 @@
   import Audit from './views/Audit.svelte';
   import Ordering from './views/Ordering.svelte';
   import Setup from './views/Setup.svelte';
-  import { loadConfig, config, getApi } from './lib/store.svelte';
+  import { loadConfig, saveConfig, config, getApi } from './lib/store.svelte';
+  import { notificationHub } from './lib/notifications.svelte';
   import { testConnection } from './lib/bootstrap';
   import { createScannerEngine } from './lib/scanner';
   import { bleScanner } from './lib/ble.svelte';
@@ -33,6 +34,27 @@
   let unsubscribeBle: (() => void) | null = null;
 
   function dispatchScan(raw: string) {
+    if (raw && (raw.includes('HWT_PAIR_CONFIG') || raw.startsWith('{"type":"HWT_PAIR_CONFIG"'))) {
+      try {
+        const payload = JSON.parse(raw);
+        if (payload.token) {
+          config.token = payload.token.trim();
+          if (payload.baseUrl) config.baseUrl = payload.baseUrl;
+          if (payload.receivingLocationId) config.receivingLocationId = payload.receivingLocationId;
+          if (payload.stagingLocationId) config.stagingLocationId = payload.stagingLocationId;
+          if (payload.labelType) config.labelType = payload.labelType;
+          saveConfig();
+          const api = getApi();
+          testConnection(api);
+          notificationHub.show('success', 'DEVICE PAIRED', 'Imported configuration from QR code!');
+          activeTab = 'locations';
+          return;
+        }
+      } catch (e) {
+        console.warn('Failed to parse pairing QR', e);
+      }
+    }
+
     if (activeTab === 'putaway' && putAwayRef) {
       putAwayRef.handleScan(raw);
     } else if (activeTab === 'ingest' && ingestRef) {

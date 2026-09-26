@@ -19,7 +19,8 @@
     X, 
     ChevronRight, 
     ClipboardCheck,
-    Loader2
+    Loader2,
+    AlertTriangle
   } from 'lucide-svelte';
 
   type Mode = 'create' | 'list';
@@ -30,6 +31,7 @@
   // Locations state
   let locations = $state<Entity[]>([]);
   let isLoadingLocations = $state(false);
+  let locationLoadError = $state<string | null>(null);
   let searchQuery = $state('');
 
   // Form fields for Create
@@ -59,12 +61,21 @@
 
   async function fetchLocations() {
     isLoadingLocations = true;
+    locationLoadError = null;
     try {
+      if (!config.token) {
+        locationLoadError = 'No API token configured on this device. Open the Setup tab to enter your Homebox token.';
+        return;
+      }
       const api = getApi();
       const items = await api.listLocations();
       locations = items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      if (locations.length === 0) {
+        locationLoadError = 'Connected to Homebox, but no location entities exist yet.';
+      }
     } catch (e: any) {
       console.error('Failed to load locations', e);
+      locationLoadError = e.message || 'Failed to load locations';
       notificationHub.show('error', 'LOAD FAILED', e.message);
     } finally {
       isLoadingLocations = false;
@@ -295,6 +306,23 @@
   {#if mode === 'create'}
     <!-- Create Location View -->
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <!-- Diagnostic Alert Banner on Error -->
+      {#if locationLoadError}
+        <div class="terminal-card p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-200 text-xs font-mono flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2 min-w-0">
+            <AlertTriangle class="w-4 h-4 text-rose-400 shrink-0" />
+            <span class="truncate">{locationLoadError}</span>
+          </div>
+          <button
+            type="button"
+            onclick={() => fetchLocations()}
+            class="btn-tactile px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[11px] font-bold shrink-0 cursor-pointer"
+          >
+            RETRY
+          </button>
+        </div>
+      {/if}
+
       <!-- Target banner -->
       <div class="flex items-center justify-between terminal-card px-3.5 py-2.5 rounded-xl border border-white/[0.08] text-xs font-mono">
         <span class="flex items-center gap-2 text-slate-300">
@@ -501,8 +529,21 @@
             <span>LOADING BINS...</span>
           </div>
         {:else if filteredLocations.length === 0}
-          <div class="text-center py-12 text-slate-500 text-xs font-mono">
-            <p>NO LOCATIONS FOUND</p>
+          <div class="text-center py-12 text-slate-500 text-xs font-mono space-y-2">
+            {#if locationLoadError}
+              <AlertTriangle class="w-8 h-8 text-rose-400 mx-auto mb-2" />
+              <p class="text-rose-300 font-bold max-w-sm mx-auto">{locationLoadError}</p>
+              <button
+                type="button"
+                onclick={() => fetchLocations()}
+                class="btn-tactile mt-2 px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] text-white text-xs cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <RefreshCw class="w-3.5 h-3.5" />
+                <span>Retry Connection</span>
+              </button>
+            {:else}
+              <p>NO LOCATIONS FOUND</p>
+            {/if}
           </div>
         {:else}
           {#each filteredLocations as loc (loc.id)}

@@ -15,6 +15,8 @@ export const config = $state<HomeboxConfig>({
 export const connected = $state({ value: false });
 
 export function saveConfig() {
+  if (config.token) config.token = config.token.trim().replace(/^["']|["']$/g, '');
+  if (config.baseUrl) config.baseUrl = config.baseUrl.trim().replace(/\/+$/, '');
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem('hb_config', JSON.stringify(config));
   }
@@ -24,7 +26,12 @@ export function loadConfig() {
   if (typeof localStorage !== 'undefined') {
     const saved = localStorage.getItem('hb_config');
     if (saved) {
-      Object.assign(config, JSON.parse(saved));
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.token) parsed.token = parsed.token.trim().replace(/^["']|["']$/g, '');
+        if (parsed.baseUrl) parsed.baseUrl = parsed.baseUrl.trim().replace(/\/+$/, '');
+        Object.assign(config, parsed);
+      } catch {}
     }
   }
 }

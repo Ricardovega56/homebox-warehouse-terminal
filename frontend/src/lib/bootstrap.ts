@@ -5,6 +5,11 @@ import { logSentinelTelemetry } from './telemetry';
 export async function testConnection(api: HomeboxApi) {
   try {
     await api.getStatus();
+    if (typeof api.hasToken === 'function' && api.hasToken()) {
+      if (typeof api.testAuth === 'function') {
+        await api.testAuth();
+      }
+    }
     connected.value = true;
     return true;
   } catch {

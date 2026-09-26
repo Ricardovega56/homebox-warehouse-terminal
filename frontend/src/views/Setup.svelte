@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import QRCode from 'qrcode';
   import { config, saveConfig, connected, getApi } from '../lib/store.svelte';
   import { testConnection, ensureSentinelLocations, auditSentinelLocations } from '../lib/bootstrap';
   import { getSentinelTelemetryLogs, clearSentinelTelemetryLogs, type SentinelTelemetryEntry } from '../lib/telemetry';
   import { bleScanner } from '../lib/ble.svelte';
   import { notificationHub } from '../lib/notifications.svelte';
+  import { runDiagnostics, type DiagnosticItem } from '../lib/diagnostics';
   import type { Entity } from '../lib/api';
   import { 
     Key, 
@@ -18,12 +20,24 @@
     Sliders, 
     Save, 
     RotateCcw,
-    Loader2
+    Loader2,
+    Eye,
+    EyeOff,
+    QrCode,
+    X
   } from 'lucide-svelte';
 
   let isTesting = $state(false);
   let isBootstrapping = $state(false);
   let isAuditing = $state(false);
+  let showToken = $state(false);
+
+  let isRunningDiagnostics = $state(false);
+  let diagnosticResults = $state<DiagnosticItem[] | null>(null);
+
+  let showPairingModal = $state(false);
+  let pairingQrDataUrl = $state<string>('');
+  let isGeneratingQr = $state(false);
 
   let auditData = $state<{ receiving: Entity[]; staging: Entity[] } | null>(null);
   let telemetryLogs = $state<SentinelTelemetryEntry[]>([]);
@@ -36,15 +50,23 @@
     telemetryLogs = getSentinelTelemetryLogs();
   }
 
+  function handleTokenChange() {
+    if (config.token) {
+      config.token = config.token.trim().replace(/^["']|["']$/g, '');
+      saveConfig();
+    }
+  }
+
   async function handleTest() {
     isTesting = true;
+    handleTokenChange();
     saveConfig();
     const ok = await testConnection(getApi());
     if (ok) {
-      notificationHub.show('success', 'HOMEBOX ONLINE', 'API connection verified successfully');
+      notificationHub.show('success', 'HOMEBOX ONLINE', 'API connection and auth verified');
       await handleAudit();
     } else {
-      notificationHub.show('error', 'CONNECTION FAILED', 'Check API token or Homebox URL');
+      notificationHub.show('error', 'CONNECTION FAILED', 'Check API token validity or Homebox URL');
     }
     isTesting = false;
   }
@@ -71,6 +93,52 @@
       console.warn('Audit failed:', e);
     } finally {
       isAuditing = false;
+    }
+  }
+
+  async function handleRunDiagnostics() {
+    isRunningDiagnostics = true;
+    handleTokenChange();
+    saveConfig();
+    try {
+      const results = await runDiagnostics(getApi(), config, (items) => {
+        diagnosticResults = items;
+      });
+      const hasFail = results.some((r) => r.status === 'fail');
+      if (hasFail) {
+        notificationHub.show('error', 'DIAGNOSTICS FAILED', 'Issues found with API, Token, or Relay');
+      } else {
+        notificationHub.show('success', 'DIAGNOSTICS PASSED', 'All terminal systems operational');
+      }
+    } catch (e: any) {
+      notificationHub.show('error', 'DIAGNOSTICS ERROR', e.message);
+    } finally {
+      isRunningDiagnostics = false;
+    }
+  }
+
+  async function handleOpenPairingQr() {
+    isGeneratingQr = true;
+    try {
+      const payload = JSON.stringify({
+        type: 'HWT_PAIR_CONFIG',
+        token: (config.token || '').trim().replace(/^["']|["']$/g, ''),
+        baseUrl: config.baseUrl || '',
+        relayUrl: config.relayUrl || '',
+        receivingLocationId: config.receivingLocationId || '',
+        stagingLocationId: config.stagingLocationId || '',
+        labelType: config.labelType || '62red',
+      });
+      pairingQrDataUrl = await QRCode.toDataURL(payload, {
+        width: 320,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+      });
+      showPairingModal = true;
+    } catch (e: any) {
+      notificationHub.show('error', 'QR GENERATION FAILED', e.message);
+    } finally {
+      isGeneratingQr = false;
     }
   }
 
@@ -137,23 +205,48 @@
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
         <span>CONNECTED</span>
       </span>
+    {:else}
+      <span class="text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 px-2.5 py-1 rounded-md flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+        <span>DISCONNECTED</span>
+      </span>
     {/if}
   </div>
   
   <!-- Token & Connection Card -->
   <div class="terminal-card rounded-xl p-4 border border-white/[0.08] space-y-4">
     <div>
-      <label for="token" class="block text-xs font-semibold text-slate-300 mb-1.5 uppercase flex items-center gap-1.5">
-        <Key class="w-3.5 h-3.5 text-amber-400" />
-        <span>Homebox API Token</span>
-      </label>
-      <input
-        id="token"
-        type="password"
-        bind:value={config.token}
-        placeholder="hb_..."
-        class="terminal-input w-full rounded-xl p-3 text-sm text-white placeholder-slate-600 font-mono"
-      />
+      <div class="flex items-center justify-between mb-1.5">
+        <label for="token" class="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
+          <Key class="w-3.5 h-3.5 text-amber-400" />
+          <span>Homebox API Token</span>
+        </label>
+        <span class="text-[10px] font-mono px-2 py-0.5 rounded border {config.token ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-slate-800 border-white/[0.08] text-slate-500'}">
+          {config.token ? `${config.token.length} chars` : 'NOT SET'}
+        </span>
+      </div>
+      <div class="relative flex items-center">
+        <input
+          id="token"
+          type={showToken ? 'text' : 'password'}
+          bind:value={config.token}
+          onchange={handleTokenChange}
+          placeholder="hb_..."
+          class="terminal-input w-full rounded-xl p-3 pr-11 text-sm text-white placeholder-slate-600 font-mono"
+        />
+        <button
+          type="button"
+          onclick={() => showToken = !showToken}
+          title={showToken ? 'Hide token' : 'Show token'}
+          class="absolute right-2.5 p-1.5 text-slate-400 hover:text-white rounded-lg bg-black/40 hover:bg-black/70 border border-white/[0.05] transition-colors cursor-pointer"
+        >
+          {#if showToken}
+            <EyeOff class="w-4 h-4" />
+          {:else}
+            <Eye class="w-4 h-4" />
+          {/if}
+        </button>
+      </div>
       <p class="text-[11px] text-slate-500 mt-1">Generated in Homebox UI ➔ Profile ➔ API Keys</p>
     </div>
 
@@ -189,14 +282,31 @@
       </button>
     </div>
 
-    <button
-      type="button"
-      onclick={() => { saveConfig(); notificationHub.show('success', 'CONFIG SAVED', 'Terminal settings updated in storage'); }}
-      class="btn-tactile w-full bg-amber-500 hover:bg-amber-400 text-black font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 cursor-pointer uppercase"
-    >
-      <Save class="w-4 h-4" />
-      <span>SAVE CONFIGURATION</span>
-    </button>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+      <button
+        type="button"
+        onclick={handleOpenPairingQr}
+        disabled={!config.token || isGeneratingQr}
+        class="btn-tactile bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-40 text-cyan-300 font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 border border-cyan-500/30 cursor-pointer uppercase shadow-lg shadow-cyan-950/20"
+      >
+        {#if isGeneratingQr}
+          <Loader2 class="w-4 h-4 animate-spin text-cyan-400" />
+          <span>GENERATING...</span>
+        {:else}
+          <QrCode class="w-4 h-4 text-cyan-400" />
+          <span>PAIR ANOTHER DEVICE (QR)</span>
+        {/if}
+      </button>
+
+      <button
+        type="button"
+        onclick={() => { handleTokenChange(); saveConfig(); notificationHub.show('success', 'CONFIG SAVED', 'Terminal settings updated in storage'); }}
+        class="btn-tactile bg-amber-500 hover:bg-amber-400 text-black font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 cursor-pointer uppercase"
+      >
+        <Save class="w-4 h-4" />
+        <span>SAVE CONFIGURATION</span>
+      </button>
+    </div>
 
     <details class="text-xs text-slate-500 pt-1">
       <summary class="cursor-pointer hover:text-slate-300 font-mono py-1">
@@ -235,6 +345,80 @@
         </div>
       </div>
     </details>
+  </div>
+
+  <!-- System Diagnostics Suite Card -->
+  <div class="terminal-card rounded-xl p-4 border border-white/[0.08] space-y-4">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <Activity class="w-4 h-4 text-emerald-400" />
+        <h3 class="text-xs font-bold text-white uppercase tracking-wider">System Health & Diagnostics</h3>
+      </div>
+      <button
+        type="button"
+        onclick={handleRunDiagnostics}
+        disabled={isRunningDiagnostics}
+        class="btn-tactile text-xs bg-emerald-500/10 hover:bg-emerald-500/20 disabled:opacity-40 text-emerald-300 border border-emerald-500/30 font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 cursor-pointer uppercase"
+      >
+        {#if isRunningDiagnostics}
+          <Loader2 class="w-3.5 h-3.5 animate-spin text-emerald-400" />
+          <span>CHECKING...</span>
+        {:else}
+          <RotateCcw class="w-3.5 h-3.5" />
+          <span>RUN FULL DIAGNOSTICS</span>
+        {/if}
+      </button>
+    </div>
+
+    {#if diagnosticResults}
+      <div class="space-y-2.5">
+        {#each diagnosticResults as item}
+          <div class="bg-black/40 rounded-xl p-3 border border-white/[0.06] space-y-1.5">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-slate-200">{item.label}</span>
+              {#if item.status === 'pass'}
+                <span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                  ✓ PASS
+                </span>
+              {:else if item.status === 'warn'}
+                <span class="bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                  ⚠ WARN
+                </span>
+              {:else if item.status === 'fail'}
+                <span class="bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                  ✕ FAIL
+                </span>
+              {:else if item.status === 'running'}
+                <span class="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                  <Loader2 class="w-3 h-3 animate-spin" />
+                  CHECKING
+                </span>
+              {:else}
+                <span class="text-slate-600 text-[10px]">IDLE</span>
+              {/if}
+            </div>
+
+            <div class="text-[11px] text-slate-400 font-sans">
+              {item.message}
+            </div>
+
+            {#if item.fix}
+              <div class="mt-1 p-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-300 flex items-start gap-1.5 font-sans leading-tight">
+                <AlertTriangle class="w-3.5 h-3.5 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  <span class="font-bold text-amber-200 uppercase font-mono text-[10px]">Suggested Fix: </span>
+                  {item.fix}
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <p class="text-xs text-slate-400 font-sans leading-relaxed">
+        Run diagnostics to test Homebox server reachability, Bearer token authentication, location catalog access, and Brother QL-800 CUPS relay health.
+      </p>
+    {/if}
   </div>
 
   <!-- Printer Paper Format Card -->
@@ -382,3 +566,61 @@
     </div>
   {/if}
 </div>
+
+<!-- Device Pairing QR Modal -->
+{#if showPairingModal}
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div class="bg-[#12131c] border border-white/[0.12] rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative">
+      <div class="flex items-center justify-between border-b border-white/[0.08] pb-3">
+        <div class="flex items-center gap-2">
+          <QrCode class="w-5 h-5 text-cyan-400" />
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider">Device Pairing QR</h3>
+        </div>
+        <button
+          type="button"
+          onclick={() => showPairingModal = false}
+          class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] cursor-pointer"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 font-sans leading-relaxed text-center">
+        Open this app on your phone, tap the <strong>Camera Scanner</strong> button in the header, and scan this code to import credentials automatically.
+      </p>
+
+      <div class="flex justify-center p-3 bg-white rounded-xl shadow-inner mx-auto max-w-[280px]">
+        {#if pairingQrDataUrl}
+          <img src={pairingQrDataUrl} alt="Pairing QR Code" class="w-full h-auto max-w-[260px] aspect-square" />
+        {:else}
+          <div class="w-[260px] h-[260px] flex items-center justify-center text-slate-700">
+            <Loader2 class="w-8 h-8 animate-spin" />
+          </div>
+        {/if}
+      </div>
+
+      <div class="bg-black/50 rounded-xl p-3 border border-white/[0.06] space-y-1 text-[11px] font-mono text-slate-400">
+        <div class="flex justify-between">
+          <span>Token:</span>
+          <span class="text-white font-bold">{config.token ? `${config.token.slice(0, 6)}... (${config.token.length} chars)` : 'None'}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Label Format:</span>
+          <span class="text-white font-bold">{config.labelType || '62red'}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Sentinels:</span>
+          <span class="text-emerald-400 font-bold">{config.receivingLocationId ? 'Configured' : 'Auto'}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onclick={() => showPairingModal = false}
+        class="btn-tactile w-full bg-white/[0.08] hover:bg-white/[0.12] text-white font-bold py-2.5 rounded-xl text-xs uppercase cursor-pointer"
+      >
+        Close
+      </button>
+    </div>
+  </div>
+{/if}
